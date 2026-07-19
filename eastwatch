@@ -1,0 +1,27 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "requests",
+#     "pyyaml",
+# ]
+# ///
+"""Source-checkout entrypoint for the packaged Eastwatch service."""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+SRC = ROOT / "src"
+if "EASTWATCH_REPO_ROOT" not in os.environ and "BOARD_WATCHER_REPO_ROOT" not in os.environ:
+    os.environ["EASTWATCH_REPO_ROOT"] = str(ROOT)
+sys.path.insert(0, str(SRC))
+
+from eastwatch.watcher import cli  # noqa: E402
+
+
+if __name__ == "__main__":
+    raise SystemExit(cli())

@@ -1,0 +1,11 @@
+.venv/
+uv.lock
+__pycache__/
+*.py[cod]
+
+# machine-rendered launchd configuration
+com.stanwang.eastwatch.plist
+
+# transient agent/session state
+.claude/
+.rpiv/

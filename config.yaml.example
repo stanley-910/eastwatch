@@ -1,0 +1,81 @@
+# eastwatch config — copy to ~/.config/eastwatch/config.yaml
+# The GitLab token itself lives in the macOS keychain, never in this file.
+
+keychain:
+  service: eastwatch-gitlab-bot
+  account: eastwatch
+# Project access tokens are scoped to one project. A project block below may
+# carry its own `keychain: {service, account}` entry; without one it uses this
+# top-level entry.
+
+# The human whose gestures (comments, trigger labels, ✅ awards) drive the board.
+owner: your-username
+
+# Max conversations being worked at once, globally.
+concurrency_cap: 3
+
+# Optional cap for concurrent per-project GitLab polling. Defaults to all configured projects.
+# Must be a positive integer; values above the project count are clamped.
+# project_poll_workers: 4
+
+# Default provider:model[:effort] per trigger kind. These are logical worker
+# specs, not Pi backend-provider names: pi:gpt-* tries headroom-copilot before
+# the same model through github-copilot; Pi Gemini/Claude models stay direct.
+# Claude CLI specs are unaffected. Overridable per conversation with a
+# [provider:model(:effort)] bracket hint in the trigger comment, issue
+# description, or an owner resume comment, e.g. [pi:gpt-5.6-luna:low] or
+# [claude:opus:max].
+defaults:
+  agent::ready: "pi:gpt-5.6-luna:low"
+  agent::ready-research: "pi:gpt-5.6-luna:low"
+  qa: "pi:gpt-5.6-luna:low"
+
+# Optional read-only Jira context enrichment. The server URL and custom field
+# IDs belong in config because they vary by Jira installation.
+jira:
+  enabled: false
+  base_url: https://jira.example.com
+  keychain:
+    service: eastwatch-jira-pat
+    account: your-username
+  custom_fields:
+    Story points: customfield_10016
+  # development_field: customfield_10000
+  sections: [essentials, status, custom, attachments]
+
+projects:
+  - host: gitlab.example.com
+    path: example-org/example-repo
+    id: 123456
+    # Project bot user (project access token owner) — used to self-filter events
+    # and to author agent comments.
+    bot_username: project_123456_bot
+    bot_user_id: 12345
+    # Enabled triggers: trigger labels by name, "mention" (@agent comments),
+    # "emoji" (✅/👍 approval on parked questions).
+    triggers: [agent::ready, agent::ready-research, mention, emoji]
+    # Shared checkout on THIS machine. Before first launch, eastwatch asks
+    # Forge to create/claim an issue worktree and launches the worker there. If
+    # the path doesn't exist yet (fresh machine), the worker is told to clone it.
+    local_checkout: ~/Developer/example-repo
+    # Optional extra instructions injected into every worker launch prompt —
+    # for machine/watcher specifics that don't belong in the repo's AGENTS.md.
+    # worker_briefing: |
+    #   Redirect pytest output to a file; the terminal wrapper garbles it.
+
+  # --- GitHub project (Status-first, label shadow) -------------------------
+  # Driven by a GitHub Projects v2 board: the canonical project's `Status`
+  # single-select is authoritative and the only command channel. Drag a card to
+  # Ready / Ready-research to dispatch; the watcher mirrors Status into a
+  # searchable `agent::*` label shadow. No keychain entry — access uses the
+  # machine's authenticated `gh` CLI (needs the `project` scope).
+  - forge: github
+    host: github.com
+    path: your-user/example-repo
+    # Canonical project NODE id (PVT_...), from `glab-board setup --board`.
+    # Required and fail-closed: title lookup is retired.
+    github_project_id: "PVT_kwHOABCDEF4A1b2c"
+    # Same trigger vocabulary as GitLab — the poller maps Status names through
+    # the fixed Status<->label table (Ready -> agent::ready, etc.).
+    triggers: [agent::ready, agent::ready-research]
+    local_checkout: ~/Developer/example-repo

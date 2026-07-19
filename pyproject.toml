@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eastwatch"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "pyyaml",
+  "requests",
+  "textual>=6.6,<7",
+]
+
+[project.scripts]
+eastwatch = "eastwatch.watcher:cli"
+board-watcher = "eastwatch.watcher:cli" # one-release compatibility alias
+fleet-dismiss = "eastwatch.fleet.dismiss:main"
+fleet-resume = "eastwatch.fleet.resume:main"
+fleet-status = "eastwatch.fleet.status:main"
+fleet-tui = "eastwatch.fleet.tui:main"
+fleet-wipe-issue = "eastwatch.fleet.wipe_issue:main"
+jira-board = "eastwatch.jira.core:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eastwatch", "src/board_watcher"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "ruff>=0.8",
+]
