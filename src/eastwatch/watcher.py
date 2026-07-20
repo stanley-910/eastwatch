@@ -38,6 +38,12 @@ from eastwatch.collector import (
 )
 from eastwatch.env import getenv
 from eastwatch.paths import REPOSITORY_ROOT
+from eastwatch.vault import (
+    VAULT_DISPATCH_INTO,
+    VAULT_DONE_STATUSES,
+    VAULT_LABEL_TO_STATUS,
+    VaultBoard,
+)
 
 
 def env_path(name: str, default: Path) -> Path:
@@ -754,6 +760,11 @@ def project_state(state: dict, key: str) -> dict:
     # github_outbox: generation string -> durable dispatch command.
     ps.setdefault("github_observations", {})
     ps.setdefault("github_outbox", {})
+    # Vault board projects only; empty and untouched for GitLab/GitHub.
+    # vault_observations: item_id -> last observed status generation record.
+    # vault_outbox: generation string -> durable dispatch command.
+    ps.setdefault("vault_observations", {})
+    ps.setdefault("vault_outbox", {})
     for conv_key, conv in ps["conversations"].items():
         conv.setdefault("anchor", "issue")
         if conv.get("anchor") == "issue":
@@ -1389,6 +1400,211 @@ def fetch_github_inputs(client: GitHubProject, proj: dict, ps: dict, triggers=No
     }
 
 
+# --------------------------------------------------------------------------- vault status poller
+
+
+def project_is_vault(proj: dict) -> bool:
+    return proj.get("forge") == "vault"
+
+
+def vault_client(proj: dict) -> VaultBoard:
+    client = proj.get("_vault")
+    if client is None:
+        raise ConfigurationError(
+            f"vault project {proj.get('path')!r} has no client; forge not initialised"
+        )
+    return client
+
+
+def vault_generation(project_id: str, item: dict) -> str:
+    """Observation key `(project, item, status)`.
+
+    Status is the sole authority and is content-derived, so a status change is
+    the only gesture that matters — mtime is deliberately excluded so iCloud
+    touching a file without a content change never looks like a new observation.
+    """
+    return f"{project_id}|{item['item_id']}|{item.get('status') or ''}"
+
+
+def vault_issue_from_item(item: dict) -> dict:
+    """The `{iid,title,web_url,description}` shape `assemble`/`make_conversation`
+    expect, built from the already-read note (no hydrate step for a local board)."""
+    return {
+        "iid": item["item_id"],
+        "title": item["title"],
+        "web_url": f"file://{item['abs_path']}",
+        "description": item.get("body") or "",
+        "note_path": item["note_path"],
+        "abs_path": item["abs_path"],
+        "model": item.get("model"),
+        "session_id": item.get("session_id"),
+    }
+
+
+def vault_task_index(items: list[dict]) -> dict:
+    """Map every way a `blockedBy` link can name a task -> its current status."""
+    index: dict[str, str] = {}
+    for it in items:
+        rel = it["note_path"]
+        rel_noext = rel[:-3] if rel.endswith(".md") else rel
+        stem = rel_noext.rsplit("/", 1)[-1]
+        for key in (rel, rel_noext, stem, it["title"]):
+            index[key] = it["status"]
+    return index
+
+
+def vault_is_blocked(item: dict, index: dict) -> str | None:
+    """The first unresolved blocker (a `blockedBy` target not yet done), else None."""
+    for target in item.get("blocked_by") or []:
+        t = target[:-3] if target.endswith(".md") else target
+        stem = t.rsplit("/", 1)[-1]
+        status = index.get(target) or index.get(t) or index.get(stem)
+        if status is not None and status not in VAULT_DONE_STATUSES:
+            return target
+    return None
+
+
+def vault_trigger_enabled(item: dict, enabled: set | None) -> bool:
+    label = VAULT_DISPATCH_INTO.get(item.get("status"))
+    return label is not None and (enabled is None or label in enabled)
+
+
+def vault_queue_fire(outbox: dict, item: dict, generation: str) -> None:
+    outbox[generation] = {
+        "item_id": item["item_id"],
+        "label": VAULT_DISPATCH_INTO[item["status"]],
+        "issue": vault_issue_from_item(item),
+        "dispatched": False,
+        "recorded_at": time.time(),
+    }
+
+
+def poll_vault_status(client, proj: dict, ps: dict, items: list[dict], triggers=None) -> dict:
+    """Diff this tick's notes against recorded observations (mirror of
+    :func:`poll_github_status`).
+
+    Mutates ``ps['vault_observations']`` and appends firing transitions to
+    ``ps['vault_outbox']`` (durably, ``dispatched=False``). A note becoming
+    ``status: agent`` from any other status fires — unless it is adopt-only
+    (bootstrap or first-seen) or blocked by an unfinished ``blockedBy`` task, in
+    which case it is *deferred*: a blocked note has no transition of its own when
+    its blocker finishes, so a deferred note is re-checked every tick and fires
+    once unblocked (parity with the old sweep's per-cycle re-evaluation).
+    """
+    observations = ps["vault_observations"]
+    outbox = ps["vault_outbox"]
+    bootstrapping = not ps.get("bootstrapped")
+    enabled = None if triggers is None else set(triggers)
+    index = vault_task_index(items)
+    changed: list[str] = []
+    present = set()
+
+    for item in items:
+        item_id = item["item_id"]
+        present.add(item_id)
+        generation = vault_generation(client.project_id, item)
+        prev = observations.get(item_id)
+        record = {
+            "generation": generation,
+            "status": item.get("status"),
+            "note_path": item.get("note_path"),
+            "abs_path": item.get("abs_path"),
+            "title": item.get("title"),
+        }
+
+        if bootstrapping:
+            observations[item_id] = record  # adopt-only: no dispatch
+            continue
+        if prev is None:
+            observations[item_id] = record
+            log.info(
+                "vault: adopted first-seen note %s at status %s — not dispatched",
+                item.get("note_path"), item.get("status"),
+            )
+            continue
+        if prev.get("generation") == generation:
+            # Status unchanged. Re-check a note deferred while blocked; fire once
+            # its blocker has finished (no transition of its own signals that).
+            if prev.get("deferred") and vault_trigger_enabled(item, enabled) and not vault_is_blocked(item, index):
+                vault_queue_fire(outbox, item, generation)
+                record["deferred"] = False
+                observations[item_id] = record
+                log.info("vault: deferred note %s now unblocked — dispatch queued", item.get("note_path"))
+            continue
+
+        prev_status = prev.get("status")
+        new_status = item.get("status")
+        changed.append(item_id)
+        if vault_trigger_enabled(item, enabled) and prev_status != new_status:
+            blocker = vault_is_blocked(item, index)
+            if blocker:
+                record["deferred"] = True  # re-checked each tick until unblocked
+                log.info(
+                    "vault: note %s reached `agent` but is blocked by %s — deferred",
+                    item.get("note_path"), blocker,
+                )
+            else:
+                vault_queue_fire(outbox, item, generation)
+                log.info(
+                    "vault: dispatch queued for note %s (%s -> %s)",
+                    item.get("note_path"), prev_status, new_status,
+                )
+        else:
+            log.info(
+                "vault: observed note %s transition %s -> %s (no dispatch)",
+                item.get("note_path"), prev_status, new_status,
+            )
+        observations[item_id] = record
+
+    return {"changed": changed, "present": present}
+
+
+def vault_dispatch_fires(ps: dict) -> list[dict]:
+    """Undispatched outbox commands as `assemble`-style `{issue, label}` fires."""
+    fires = []
+    for gen in sorted(ps["vault_outbox"]):
+        entry = ps["vault_outbox"][gen]
+        if entry.get("dispatched"):
+            continue
+        fires.append({"issue": entry["issue"], "label": entry["label"], "_generation": gen})
+    return fires
+
+
+def vault_mark_dispatched(ps: dict, fires: list[dict]) -> None:
+    """Mark outbox commands consumed and trim old entries (crash-exactly-once,
+    same guarantee as :func:`github_mark_dispatched`)."""
+    outbox = ps["vault_outbox"]
+    for fire in fires:
+        gen = fire.get("_generation")
+        if gen in outbox:
+            outbox[gen]["dispatched"] = True
+    dispatched = [g for g, e in outbox.items() if e.get("dispatched")]
+    for gen in sorted(dispatched, key=lambda g: outbox[g].get("recorded_at", 0))[:-200]:
+        del outbox[gen]
+
+
+def fetch_vault_inputs(client, proj: dict, ps: dict, triggers=None) -> dict:
+    """Local-poll one vault board: read notes, diff status, queue fires.
+
+    Returns the same shape as :func:`fetch_project_inputs` so the shared
+    commit/assemble path is unchanged. Fires are derived from the durable outbox
+    in the commit phase, not here.
+    """
+    items = client.fetch_items()
+    poll_vault_status(client, proj, ps, items, triggers=triggers)
+    if not ps.get("bootstrapped"):
+        log.info(
+            "bootstrap: vault %s adopted %d note(s), none dispatched",
+            proj.get("path"), len(items),
+        )
+    return {
+        "poll_state": ps,
+        "comments": [],
+        "label_fires": [],
+        "new_awards": set(),
+    }
+
+
 # --------------------------------------------------------------------------- conversations
 
 
@@ -1623,6 +1839,64 @@ def apply_hint(conv: dict, spec: dict) -> bool:
     return provider_changed
 
 
+def vault_model_hint(model: str | None) -> str | None:
+    """Normalise a note's bare ``model:`` into a ``[provider:model]`` bracket hint
+    so ``parse_hint`` (which requires a ``claude|pi`` provider) can consume it."""
+    if not model:
+        return None
+    m = str(model).strip()
+    if not m:
+        return None
+    return f"[{m}]" if ":" in m else f"[claude:{m}]"
+
+
+def make_vault_conversation(proj: dict, issue: dict, kind: str, hint_texts: list, defaults: dict) -> dict:
+    """A conversation for a vault task note — built from the note itself (no API,
+    no worktree; the worker runs in the vault so it loads AGENTS.md natively)."""
+    hints = [h for h in (vault_model_hint(issue.get("model")), *hint_texts) if h]
+    # A note's own `model:` wins; else this project's `default_spec`; else the
+    # global default for the trigger; else claude:sonnet.
+    fallback = proj.get("default_spec") or defaults.get(kind) or "claude:sonnet"
+    spec = parse_hint(*hints) or spec_from_string(fallback)
+    slug = proj["path"].replace("/", "-")
+    session_dir = CONVOS_DIR / f"{slug}-{issue['iid']}"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    cwd = str(Path(proj["vault_path"]).expanduser())
+    return {
+        "provider": spec["provider"],
+        "model": spec["model"],
+        "effort": spec.get("effort"),
+        # Rename-resume: a session-id persisted in the note reattaches the same
+        # claude session even though a rename gave the note a new item_id.
+        "session_id": issue.get("session_id"),
+        "session_file": None,
+        "cwd": cwd,
+        "session_dir": str(session_dir),
+        "host": proj["host"],
+        "project_path": proj["path"],
+        "checkout": cwd,
+        "briefing": proj.get("worker_briefing"),
+        "thread_context": "",
+        "jira_context": "",
+        "status": "new",
+        "kind": kind,
+        "anchor": "issue",
+        "forge": "vault",
+        "note_path": issue.get("note_path"),
+        "abs_path": issue.get("abs_path"),
+        "reply_target": None,
+        "issue_iid": str(issue["iid"]),
+        "issue_title": issue["title"],
+        "issue_url": issue.get("web_url"),
+        "issue_desc": (issue.get("description") or "")[:6000],
+        "pending": [],
+        "mr_iids": [],
+        "parked_note_id": None,
+        "last_note_id": None,
+        "last_reply_body_hash": None,
+    }
+
+
 def make_conversation(
     gl: GitLab,
     proj: dict,
@@ -1632,6 +1906,8 @@ def make_conversation(
     defaults: dict,
     jira_defaults: dict | None = None,
 ) -> dict:
+    if project_is_vault(proj):
+        return make_vault_conversation(proj, issue, kind, hint_texts, defaults)
     spec = parse_hint(*hint_texts) or spec_from_string(defaults[kind])
     slug = proj["path"].replace("/", "-")
     session_dir = CONVOS_DIR / f"{slug}-{issue['iid']}"
@@ -3632,6 +3908,15 @@ def worker_main(request_path: str) -> int:
 
 
 def response_protocol(conv: dict) -> str:
+    if conv.get("forge") == "vault":
+        return (
+            "Your final reply will be written verbatim into the task note's `## Result` section by "
+            "the watcher — you do not edit the note yourself. Only your single final message is saved, "
+            "so put your COMPLETE answer there; do not refer to an answer you wrote 'above' in an "
+            "earlier message. End your reply with exactly one status line: `STATUS: done` (the card "
+            "moves to `review`) or `STATUS: parked` (the card moves to `needs-input`) — for parked, "
+            "state one concrete question AND your recommended default."
+        )
     target = conv.get("reply_target") or {}
     destination = "merge request thread" if target.get("kind") == "mr" else "issue"
     return (
@@ -3662,6 +3947,8 @@ def prepare_issue_workspace(conv: dict) -> bool:
     """
     if conv.get("workspace_prepared"):
         return True
+    if conv.get("forge") == "vault":
+        return True  # the vault IS the checkout; no Forge worktree onboarding
     if conv.get("anchor") != "issue" or conv.get("kind") not in TRIGGER_LABELS:
         return False
     checkout = conv.get("checkout")
@@ -3708,6 +3995,12 @@ def prepare_issue_workspace(conv: dict) -> bool:
 
 
 def workspace_prompt(conv: dict) -> str | None:
+    if conv.get("forge") == "vault":
+        return (
+            f"Workspace: you are running inside the Obsidian vault at `{conv['cwd']}`. Read "
+            "AGENTS.md / CLAUDE.md and obey the vault rules. Work directly in the vault; do not "
+            "create git worktrees or branches, and do not run any board/dispatch tooling."
+        )
     if not conv.get("checkout"):
         return None
     command = forge_board_path()
@@ -3775,6 +4068,19 @@ def build_launch_prompt(conv: dict, msgs: list[str]) -> str:
         if conv.get("mr_desc"):
             parts.append(f"MR description:\n\n{conv['mr_desc']}")
         parts.append("Answer the following question about this merge request:\n\n" + "\n\n".join(msgs))
+    elif conv.get("forge") == "vault":
+        parts = [
+            f"You are working an Obsidian task note at `{conv.get('note_path')}` in this vault: "
+            f"**{conv['issue_title']}**. Do the task end-to-end."
+        ]
+        parts.append(
+            "The watcher owns this card. Do NOT edit the note's frontmatter or `status:`, do NOT "
+            "write a `## Result` section, and do NOT run `/work-task` or any board/dispatch tooling. "
+            "Return your COMPLETE result as your final message — the watcher writes it into the note's "
+            "`## Result` and moves the card. If the task changed other files in the vault, leave them "
+            "uncommitted for the owner to review; do NOT git-commit."
+        )
+        parts.append(CHARTER_COMMON)
     else:
         parts = [f"You are working GitLab issue {conv['issue_url']}: {conv['issue_title']}."]
         if conv["kind"] == "agent::ready":
@@ -3913,6 +4219,8 @@ def github_write_status(client: GitHubProject, number, status_name: str) -> None
 
 
 def set_issue_labels(gl: GitLab, proj: dict, iid: str, add=(), remove=()):
+    if project_is_vault(proj):
+        return  # vault has no labels; the note's `status:` field is the authority
     if project_is_github(proj):
         # On GitHub the poller's single shadow writer owns every `agent::*` /
         # `triage::*` label. No other path writes lifecycle labels, so this is a
@@ -3928,12 +4236,35 @@ def set_issue_labels(gl: GitLab, proj: dict, iid: str, add=(), remove=()):
         gl.put(f"projects/{proj['id']}/issues/{iid}", **params)
 
 
-def set_issue_agent_label(gl: GitLab, proj: dict, iid: str, label: str) -> None:
+def vault_write_status(proj: dict, conv: dict | None, label: str) -> None:
+    """Move a task note's ``status:`` to the vault status a lifecycle label maps
+    to. The working transition takes ownership (``agent`` -> ``in-progress``);
+    terminal transitions are guarded so a human drag mid-run is not clobbered,
+    and the settled note is committed once."""
+    status = VAULT_LABEL_TO_STATUS.get(label)
+    if status is None or conv is None:
+        return
+    abs_path = conv.get("abs_path")
+    if not abs_path or not Path(abs_path).exists():
+        log.warning("vault: note for %s missing; cannot write status %s", conv.get("issue_iid"), status)
+        return
+    board = vault_client(proj)
+    if label in (WORKING_LABEL, RESEARCHING_LABEL):
+        board.set_status(abs_path, status)  # take ownership; transient, uncommitted
+    elif board.set_status_fenced(abs_path, status):
+        board.git_commit(abs_path, f"agent({(conv.get('issue_title') or '')[:60]}): {status}")
+
+
+def set_issue_agent_label(gl: GitLab, proj: dict, iid: str, label: str, conv: dict | None = None) -> None:
     """Set the sole agent lifecycle label, including on forges without scopes.
 
     On GitHub the label is a shadow, not the command: this writes the mapped
-    authoritative Status (guarded); the poller's shadow writer mirrors it.
+    authoritative Status (guarded); the poller's shadow writer mirrors it. On the
+    vault the ``status:`` field is itself the authority, so this writes it.
     """
+    if project_is_vault(proj):
+        vault_write_status(proj, conv, label)
+        return
     if project_is_github(proj):
         github_write_status(github_client(proj), int(iid), LABEL_TO_STATUS[label])
         return
@@ -3964,6 +4295,18 @@ def label_issue_iid(conv: dict) -> str | None:
 
 def post_conversation_note(gl: GitLab, proj: dict, conv: dict, body: str) -> dict:
     target = conv.get("reply_target") or {}
+    if project_is_vault(proj):
+        # Write-back into the note: append the worker's reply as `## Result` and
+        # stamp the session-id (rename-resume). The `status:` move + git commit
+        # happen in the terminal `set_issue_agent_label` that follows.
+        board = vault_client(proj)
+        abs_path = conv.get("abs_path")
+        if not abs_path or not Path(abs_path).exists():
+            raise ValueError(f"vault conversation {conv.get('issue_iid')} note path missing: {abs_path}")
+        note = board.append_result_section(abs_path, body)
+        if conv.get("session_id"):
+            board.write_frontmatter_field(abs_path, "session-id", conv["session_id"])
+        return note
     if project_is_github(proj):
         # GitHub conversations are issue-anchored; the worker's resolution is a
         # plain issue comment (no discussion threads / MR notes in slice 1).
@@ -4077,7 +4420,7 @@ def mark_failed(gl: GitLab, proj: dict, conv_key: str, conv: dict, failure_class
         log.warning("conversation %s: could not post failure note: %s", conv_key, e)
     if issue_iid:
         try:
-            set_issue_agent_label(gl, proj, issue_iid, FAILED_LABEL)
+            set_issue_agent_label(gl, proj, issue_iid, FAILED_LABEL, conv)
         except requests.RequestException as e:
             log.warning("issue !%s: could not update failure labels: %s", issue_iid, e)
     log.info("conversation %s: failed (%s) — posted note %s", conv_key, failure_class, note_id)
@@ -4120,7 +4463,7 @@ def collect_success(gl: GitLab, proj: dict, ps: dict, conv_key: str, conv: dict,
         terminal_label = MR_READY_LABEL if conversation_has_mr(ps, conv_key) else FOR_HUMAN_LABEL
     if issue_iid:
         try:
-            set_issue_agent_label(gl, proj, issue_iid, terminal_label)
+            set_issue_agent_label(gl, proj, issue_iid, terminal_label, conv)
         except requests.RequestException as e:
             log.warning("issue !%s: posted note %s but could not update labels: %s", issue_iid, note["id"], e)
     log.info("conversation %s: %s — posted note %s", conv_key, status, note["id"])
@@ -4381,7 +4724,7 @@ def start_one(gl: GitLab, proj: dict, ps: dict, conv_key: str, state: dict) -> b
     conv["status"] = "working"
     issue_iid = label_issue_iid(conv)
     if issue_iid:
-        set_issue_agent_label(gl, proj, issue_iid, active_label(conv))
+        set_issue_agent_label(gl, proj, issue_iid, active_label(conv), conv)
     save_state(state)
     log.info(
         "dispatch: conversation %s %s %s:%s:%s run %s",
@@ -4661,6 +5004,41 @@ def validate_github_projects(projects: list[dict]) -> None:
             )
 
 
+def validate_vault_projects(projects: list[dict], *, check_fs: bool = False) -> None:
+    """`forge: vault` projects need a `vault_path` and only the `agent::ready` trigger.
+
+    The string/trigger checks are I/O-free (safe for preflight); ``check_fs``
+    additionally verifies the path is a directory (and warns if commits are on
+    but it is not a git repo) — the runtime-only pass.
+    """
+    for proj in projects:
+        if not project_is_vault(proj):
+            continue
+        vault_path = proj.get("vault_path")
+        if not (isinstance(vault_path, str) and vault_path.strip()):
+            raise ConfigurationError(
+                f"project {proj.get('path')!r}: forge: vault requires a non-empty `vault_path`"
+            )
+        triggers = proj.get("triggers", []) or []
+        unknown = [t for t in triggers if t != TRIGGER_LABELS[0]]
+        if unknown:
+            raise ConfigurationError(
+                f"project {proj.get('path')!r}: forge: vault supports only "
+                f"triggers [{TRIGGER_LABELS[0]}], got {triggers}"
+            )
+        if check_fs:
+            resolved = Path(vault_path).expanduser()
+            if not resolved.is_dir():
+                raise ConfigurationError(
+                    f"project {proj.get('path')!r}: vault_path {vault_path!r} is not a directory"
+                )
+            if proj.get("commit_results", True) and not (resolved / ".git").exists():
+                log.warning(
+                    "project %s: commit_results is on but %s is not a git repo — commits will be skipped",
+                    proj.get("path"), vault_path,
+                )
+
+
 def project_poll_state_snapshot(ps: dict) -> dict:
     """Copy only the fields remote pollers mutate, leaving live state untouched."""
     return {
@@ -4674,6 +5052,9 @@ def project_poll_state_snapshot(ps: dict) -> dict:
         "github_observations": copy.deepcopy(ps.get("github_observations", {})),
         "github_outbox": copy.deepcopy(ps.get("github_outbox", {})),
         "github_restore": github_restore_map(ps),
+        # Vault status poller state (local board); empty for GitLab/GitHub.
+        "vault_observations": copy.deepcopy(ps.get("vault_observations", {})),
+        "vault_outbox": copy.deepcopy(ps.get("vault_outbox", {})),
         "conversations": ps.get("conversations", {}),
     }
 
@@ -4698,10 +5079,22 @@ def apply_project_poll_state(ps: dict, poll_state: dict) -> None:
         ps["github_observations"] = poll_state["github_observations"]
     if "github_outbox" in poll_state:
         ps["github_outbox"] = poll_state["github_outbox"]
+    if "vault_observations" in poll_state:
+        ps["vault_observations"] = poll_state["vault_observations"]
+    if "vault_outbox" in poll_state:
+        ps["vault_outbox"] = poll_state["vault_outbox"]
 
 
 def build_forge_client(proj: dict, cfg: dict):
-    """The remote client for a project: GitHubProject or GitLab, by `forge`."""
+    """The client for a project: VaultBoard, GitHubProject or GitLab, by `forge`."""
+    if project_is_vault(proj):
+        client = VaultBoard(
+            proj["vault_path"],
+            proj.get("tasks_glob", "inbox/tasks/*.md"),
+            commit_results=proj.get("commit_results", True),
+        )
+        proj["_vault"] = client  # seam for the forge-aware status/result writers
+        return client
     if project_is_github(proj):
         client = GitHubProject(proj["github_project_id"], proj["path"])
         proj["_github"] = client  # seam for the forge-aware Status/label writers
@@ -4735,6 +5128,8 @@ def prepare_project_context(cfg: dict, state: dict, proj: dict) -> dict:
 
 def fetch_project_inputs(gl, proj: dict, ps_snapshot: dict, owner: str, triggers: list[str]) -> dict:
     """Fetch remote project inputs against an isolated poll-state snapshot."""
+    if project_is_vault(proj):
+        return fetch_vault_inputs(gl, proj, ps_snapshot, triggers=triggers)
     if project_is_github(proj):
         return fetch_github_inputs(gl, proj, ps_snapshot, triggers=triggers)
     comments = poll_comments(gl, proj, ps_snapshot, owner)
@@ -4758,8 +5153,9 @@ def commit_project_inputs(cfg: dict, state: dict, ctx: dict, fetched: dict) -> N
     # fetch result — so a crash between observe and dispatch neither loses nor
     # repeats work. Marking consumed happens in the SAME atomic save as the
     # conversation `assemble` creates below.
+    vault_fires = vault_dispatch_fires(staged_ps) if project_is_vault(ctx["proj"]) else []
     github_fires = github_dispatch_fires(staged_ps) if project_is_github(ctx["proj"]) else []
-    label_fires = github_fires or fetched["label_fires"]
+    label_fires = vault_fires or github_fires or fetched["label_fires"]
     assemble(
         ctx["gl"],
         ctx["proj"],
@@ -4774,6 +5170,8 @@ def commit_project_inputs(cfg: dict, state: dict, ctx: dict, fetched: dict) -> N
     )
     if github_fires:
         github_mark_dispatched(staged_ps, github_fires)
+    if vault_fires:
+        vault_mark_dispatched(staged_ps, vault_fires)
     if ctx["bootstrapping"]:
         staged_ps["bootstrapped"] = True
 
@@ -4805,6 +5203,7 @@ def project_poll_worker_count(cfg: dict, project_count: int) -> int:
 def reconcile_projects(cfg: dict, state: dict) -> list[dict]:
     validate_unique_project_keys(cfg["projects"])
     validate_github_projects(cfg["projects"])
+    validate_vault_projects(cfg["projects"], check_fs=True)
     configured_project_poll_workers(cfg)
     contexts = []
     for proj in cfg["projects"]:
@@ -4963,7 +5362,7 @@ def validate_preflight_config(cfg) -> list[str]:
                 )
         if project_is_valid:
             valid_projects.append(proj)
-    for validator in (validate_unique_project_keys, validate_github_projects):
+    for validator in (validate_unique_project_keys, validate_github_projects, validate_vault_projects):
         try:
             validator(valid_projects)
         except ConfigurationError as e:

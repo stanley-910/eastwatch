@@ -141,6 +141,26 @@ after a conversation completes.
    project block.
 5. Next cycle bootstraps it (adopt-only) automatically.
 
+## Adding an Obsidian vault board (`forge: vault`)
+
+A local Obsidian TaskNotes board is a first-class forge — no token, no keychain,
+no Obsidian process required (the watcher reads/writes note frontmatter directly
+on disk). See [`docs/vault-provider.md`](docs/vault-provider.md) for the full
+contract. In short:
+
+1. Append a `forge: vault` block to `projects:` (see `config.yaml.example`) with
+   `vault_path`, a synthetic ASCII `host: local` + `path: <slug>` (they key the
+   state and name the tmux/session dirs — the CJK vault dir cannot), and
+   `local_checkout: <vault_path>` so the worker runs in the vault and loads its
+   AGENTS.md/CLAUDE.md.
+2. The note's frontmatter `status:` is the authority. Drag a note to
+   `status: agent` to dispatch; the watcher moves it through `in-progress` →
+   `review` (done) / `needs-input` (parked) and writes the reply into a
+   `## Result` section. Resume a parked note by dragging it back to `agent`.
+3. Next cycle bootstraps adopt-only. **Never run this alongside the retired vault
+   bash dispatcher** — both launch `task-<slug>` tmux sessions and would
+   double-dispatch.
+
 ## Worker workspace & context
 
 Before the first implementation/research launch, the watcher runs Forge's

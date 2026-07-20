@@ -12,6 +12,7 @@ semantics, recovery procedures, and troubleshooting.
 Production Python code lives under `src/eastwatch/`:
 
 - `watcher.py` contains reconciliation and worker orchestration.
+- `vault.py` contains the `forge: vault` client for a local Obsidian TaskNotes board (see [`docs/vault-provider.md`](docs/vault-provider.md)).
 - `fleet/` contains the fleet model, status emitter, TUI, resume, dismiss, and wipe logic.
 - `jira/` contains the read-only Jira client and CLI logic.
 

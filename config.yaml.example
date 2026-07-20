@@ -79,3 +79,25 @@ projects:
     # the fixed Status<->label table (Ready -> agent::ready, etc.).
     triggers: [agent::ready, agent::ready-research]
     local_checkout: ~/Developer/example-repo
+
+  # --- Vault project (Obsidian TaskNotes board; the note `status:` is authority) -
+  # Driven by a local Obsidian vault: each task note's frontmatter `status:` field
+  # is authoritative and read/written directly on disk (no Obsidian required).
+  # Drag a note to `status: agent` to dispatch; the watcher moves it to
+  # `in-progress` while working, then `review` (done) or `needs-input` (parked),
+  # and writes the worker's reply into a `## Result` section. No keychain entry.
+  - forge: vault
+    host: local                  # synthetic; satisfies preflight + keys state as `local/<path>`
+    path: garden                 # synthetic ASCII name -> state key, session-dir slug, tmux names
+    vault_path: "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/花园"
+    tasks_glob: inbox/tasks/*.md # notes with `tags: task` + a `status:` under this glob
+    # Worker runs IN the vault so claude loads its AGENTS.md/CLAUDE.md natively.
+    local_checkout: "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/花园"
+    triggers: [agent::ready]     # dragging a note to `status: agent` dispatches
+    # The watcher commits each note it writes (status + `## Result`), one file per
+    # commit. Set false to leave note edits uncommitted for you to review.
+    commit_results: true
+    # Model for notes without their own `model:` frontmatter (per-note wins).
+    default_spec: "claude:sonnet"
+    # worker_briefing: |
+    #   Vault-specific rules injected into every worker launch prompt.

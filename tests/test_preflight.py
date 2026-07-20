@@ -307,6 +307,56 @@ class PreflightTest(unittest.TestCase):
         self.assertTrue(any("github_project_id" in error for error in errors), errors)
         self.assertTrue(any("glab-board setup --board" in error for error in errors), errors)
 
+    def test_vault_project_requires_vault_path(self):
+        errors = watcher.validate_preflight_config(
+            {"projects": [{"forge": "vault", "host": "local", "path": "vault/board"}]}
+        )
+
+        self.assertTrue(
+            any("forge: vault requires a non-empty `vault_path`" in error for error in errors),
+            errors,
+        )
+
+    def test_vault_project_rejects_non_agent_ready_trigger(self):
+        errors = watcher.validate_preflight_config(
+            {
+                "projects": [
+                    {
+                        "forge": "vault",
+                        "host": "local",
+                        "path": "vault/board",
+                        "vault_path": "/tmp/vault",
+                        "triggers": ["agent::ready-research"],
+                    }
+                ]
+            }
+        )
+
+        self.assertTrue(
+            any(
+                "vault/board" in error and "agent::ready-research" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_valid_vault_project_passes(self):
+        errors = watcher.validate_preflight_config(
+            {
+                "projects": [
+                    {
+                        "forge": "vault",
+                        "host": "local",
+                        "path": "vault/board",
+                        "vault_path": "/tmp/vault",
+                        "triggers": ["agent::ready"],
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(errors, [])
+
     def test_malformed_state_reports_parse_error(self):
         self.write_valid_config()
         self.state_path.write_text("{")
