@@ -199,7 +199,7 @@ class PiParallelismTest(unittest.TestCase):
 
         self.assertEqual(started_keys, ["1", "2"])
 
-    def test_start_removes_consumed_trigger_label_when_marking_issue_working(self):
+    def test_start_clears_prior_state_labels_when_marking_issue_working(self):
         session_dir = TMP_ROOT / "label-lifecycle"
         conv = {
             "provider": "pi",
@@ -235,7 +235,7 @@ class PiParallelismTest(unittest.TestCase):
             project,
             "42",
             add=[watcher.WORKING_LABEL],
-            remove=[label for label in watcher.AGENT_LABELS if label != watcher.WORKING_LABEL],
+            remove=[label for label in watcher.SHADOW_LABELS if label != watcher.WORKING_LABEL],
         )
 
     def test_project_polling_fetches_projects_in_parallel_and_commits_serially(self):

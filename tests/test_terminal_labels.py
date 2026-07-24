@@ -21,7 +21,7 @@ class FakeForge:
 
     def __init__(self, scoped: bool):
         self.scoped = scoped
-        self.labels = set(watcher.AGENT_LABELS) | {"category::feature"}
+        self.labels = set(watcher.SHADOW_LABELS) | {"category::feature"}
         self.puts = []
         self.next_note_id = 100
 
@@ -55,10 +55,7 @@ class TerminalLabelTest(unittest.TestCase):
         }
 
     def assert_agent_label(self, forge, expected):
-        self.assertEqual(
-            {label for label in forge.labels if label.startswith("agent::")},
-            {expected},
-        )
+        self.assertEqual(forge.labels & set(watcher.SHADOW_LABELS), {expected})
         self.assertIn("category::feature", forge.labels)
 
     def collect_done(self, forge, *, with_mr):
@@ -80,7 +77,7 @@ class TerminalLabelTest(unittest.TestCase):
 
     def test_done_with_mr_moves_to_mr_ready(self):
         for scoped in (True, False):
-            with self.subTest(forge="gitlab" if scoped else "github"):
+            with self.subTest(scoped_labels=scoped):
                 forge = FakeForge(scoped)
                 conv = self.collect_done(forge, with_mr=True)
                 self.assertEqual(conv["status"], "done")
@@ -88,7 +85,7 @@ class TerminalLabelTest(unittest.TestCase):
 
     def test_done_without_mr_moves_to_for_human(self):
         for scoped in (True, False):
-            with self.subTest(forge="gitlab" if scoped else "github"):
+            with self.subTest(scoped_labels=scoped):
                 forge = FakeForge(scoped)
                 conv = self.collect_done(forge, with_mr=False)
                 self.assertEqual(conv["status"], "done")
@@ -96,7 +93,7 @@ class TerminalLabelTest(unittest.TestCase):
 
     def test_wrapper_failure_moves_to_failed(self):
         for scoped in (True, False):
-            with self.subTest(forge="gitlab" if scoped else "github"):
+            with self.subTest(scoped_labels=scoped):
                 forge = FakeForge(scoped)
                 conv = self.make_conversation()
                 watcher.mark_failed(forge, PROJ, "41", conv, "timeout")
@@ -130,9 +127,9 @@ class TerminalLabelTest(unittest.TestCase):
         )
         self.assert_agent_label(forge, watcher.FAILED_LABEL)
 
-    def test_research_dispatch_moves_to_researching(self):
+    def test_research_dispatch_moves_to_researching_and_clears_triage(self):
         for scoped in (True, False):
-            with self.subTest(forge="gitlab" if scoped else "github"):
+            with self.subTest(scoped_labels=scoped):
                 forge = FakeForge(scoped)
                 session_dir = TMP_ROOT / f"research-{scoped}"
                 conv = self.make_conversation(kind="agent::ready-research") | {

@@ -72,16 +72,6 @@ PARKED_LABEL = "agent::parked"
 MR_READY_LABEL = "agent::mr-ready"
 FAILED_LABEL = "agent::failed"
 FOR_HUMAN_LABEL = "agent::for-human"
-AGENT_LABELS = (
-    *TRIGGER_LABELS,
-    WORKING_LABEL,
-    RESEARCHING_LABEL,
-    PARKED_LABEL,
-    MR_READY_LABEL,
-    FAILED_LABEL,
-    FOR_HUMAN_LABEL,
-)
-
 # GitHub Projects v2 `Status` single-select option <-> shadow label. Bijective
 # and FIXED by the pinned contract: on GitHub the canonical project's Status is
 # authoritative and the only command channel; these `agent::*`/`triage::*` labels
@@ -4256,7 +4246,7 @@ def vault_write_status(proj: dict, conv: dict | None, label: str) -> None:
 
 
 def set_issue_agent_label(gl: GitLab, proj: dict, iid: str, label: str, conv: dict | None = None) -> None:
-    """Set the sole agent lifecycle label, including on forges without scopes.
+    """Set the sole workflow-state label, including on forges without scopes.
 
     On GitHub the label is a shadow, not the command: this writes the mapped
     authoritative Status (guarded); the poller's shadow writer mirrors it. On the
@@ -4273,7 +4263,7 @@ def set_issue_agent_label(gl: GitLab, proj: dict, iid: str, label: str, conv: di
         proj,
         iid,
         add=[label],
-        remove=[candidate for candidate in AGENT_LABELS if candidate != label],
+        remove=[candidate for candidate in SHADOW_LABELS if candidate != label],
     )
 
 
