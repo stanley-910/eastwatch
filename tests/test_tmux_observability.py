@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from eastwatch import sessions
 from eastwatch.collector import ClaudeStreamCollector, PiStreamCollector, RunJournal
 from eastwatch.fleet import status as fleet_status
 from tests.support import load_watcher
@@ -315,6 +316,90 @@ class ClaudeStreamCollectorTest(unittest.TestCase):
     def test_no_result_raises_indexerror(self):
         with self.assertRaises(IndexError):
             self.collect('{"type":"assistant"}\n').result()
+
+    def test_session_id_captured_from_opening_init_event(self):
+        collector = self.collect(
+            '{"type":"system","subtype":"init","session_id":"s1"}\n'
+        )
+        self.assertEqual(collector.session_id, "s1")
+
+    def test_session_id_read_from_any_event_carrying_one(self):
+        # The stream schema is internal, so discovery must not depend on
+        # matching a particular event type.
+        collector = self.collect('{"type":"unheard-of","session_id":"s9"}\n')
+        self.assertEqual(collector.session_id, "s9")
+
+    def test_session_id_tracks_a_mid_stream_change(self):
+        collector = self.collect(
+            '{"type":"system","subtype":"init","session_id":"s1"}\n'
+            '{"type":"system","subtype":"init","session_id":"s2"}\n'
+        )
+        self.assertEqual(collector.session_id, "s2")
+
+    def test_events_without_a_session_id_do_not_clear_it(self):
+        collector = self.collect(
+            '{"type":"system","subtype":"init","session_id":"s1"}\n'
+            '{"type":"assistant","message":{"content":[]}}\n'
+        )
+        self.assertEqual(collector.session_id, "s1")
+
+    def test_discover_session_journals_each_file_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal_path = Path(tmp) / "run.jsonl"
+            collector = ClaudeStreamCollector(RunJournal(journal_path, "test"))
+            collector.discover_session("/tmp/projects/slug/s1.jsonl")
+            collector.discover_session("/tmp/projects/slug/s1.jsonl")
+            collector.discover_session(None)
+            facts = [
+                json.loads(line)
+                for line in journal_path.read_text().splitlines()
+                if line.strip()
+            ]
+        self.assertEqual([fact["type"] for fact in facts], ["session_discovered"])
+        self.assertEqual(facts[0]["session_file"], "/tmp/projects/slug/s1.jsonl")
+
+
+class ClaudeSessionResolutionTest(unittest.TestCase):
+    """find_claude_session_file globs the id rather than rebuilding the slug."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.config = Path(self.tmp.name)
+
+    def write_transcript(self, slug, session_id, body='{"anything":true}\n'):
+        path = self.config / "projects" / slug / f"{session_id}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body)
+        return path
+
+    def resolve(self, session_id):
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.config)}):
+            return sessions.find_claude_session_file(session_id)
+
+    def test_resolves_under_any_project_slug(self):
+        path = self.write_transcript("-Users-someone-Developer-repo", "s1")
+        self.assertEqual(self.resolve("s1"), str(path))
+
+    def test_contents_are_never_parsed(self):
+        # Claude documents the transcript schema as internal, so resolution
+        # must survive a body we do not recognise at all.
+        path = self.write_transcript("-slug", "s2", body="not json at all\n")
+        self.assertEqual(self.resolve("s2"), str(path))
+
+    def test_missing_transcript_resolves_to_none(self):
+        self.write_transcript("-slug", "s1")
+        self.assertIsNone(self.resolve("s-absent"))
+
+    def test_blank_session_id_resolves_to_none(self):
+        self.assertIsNone(self.resolve(None))
+        self.assertIsNone(self.resolve(""))
+
+    def test_absent_config_dir_resolves_to_none(self):
+        with mock.patch.dict(
+            os.environ, {"CLAUDE_CONFIG_DIR": str(self.config / "nope")}
+        ):
+            self.assertIsNone(sessions.find_claude_session_file("s1"))
 
 
 class DrainProcessTest(unittest.TestCase):
@@ -764,7 +849,90 @@ class FleetStatusDerivedTest(unittest.TestCase):
         self.assertEqual(emitted["effort"], "high")
         self.assertEqual(emitted["cwd"], "/tmp/repo")
         self.assertEqual(emitted["log"], "/tmp/last-stream.log")
+        self.assertEqual(emitted["trace_source"], "legacy-stream")
         self.assertEqual(emitted["started_at"], 123.0)
+
+    def build_one(self, conv):
+        state = {
+            "projects": {"gitlab.example/group/repo": {"conversations": {"62": conv}}}
+        }
+        with (
+            mock.patch.object(self.fs, "load_state", lambda: state),
+            mock.patch.object(self.fs, "live_tmux_sessions", set),
+            mock.patch.object(self.fs, "running_tmux_sessions", set),
+        ):
+            built = self.fs.build_rows()
+        self.assertEqual(len(built), 1)
+        return built[0]
+
+    def claude_conv(self, **overrides):
+        conv = {
+            "status": "done",
+            "provider": "claude",
+            "model": "opus",
+            "session_id": "sid-62",
+            "cwd": "/tmp/repo",
+            "session_dir": "/tmp/convos/repo-62",
+            "last_run": {"run_id": "run-62"},
+        }
+        conv.update(overrides)
+        return conv
+
+    def test_claude_row_previews_its_native_transcript(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "sid-62.jsonl"
+            transcript.write_text('{"anything":true}\n')
+            emitted = self.build_one(
+                self.claude_conv(session_file=str(transcript)),
+            )
+        self.assertEqual(emitted["log"], str(transcript))
+        self.assertEqual(emitted["trace_source"], "session")
+
+    def test_finished_claude_row_backfills_from_its_session_id(self):
+        # Runs that predate discovery have neither a stored session_file nor a
+        # session_discovered fact — only the id claude reported.
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp)
+            transcript = config / "projects" / "-tmp-repo" / "sid-62.jsonl"
+            transcript.parent.mkdir(parents=True)
+            transcript.write_text('{"anything":true}\n')
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(config)}):
+                emitted = self.build_one(self.claude_conv())
+        self.assertEqual(emitted["log"], str(transcript))
+        self.assertEqual(emitted["trace_source"], "session")
+
+    def test_pruned_transcript_reports_expired_not_blank(self):
+        emitted = self.build_one(
+            self.claude_conv(session_file="/tmp/absent/sid-62.jsonl"),
+        )
+        self.assertEqual(emitted["log"], "")
+        self.assertEqual(emitted["trace_source"], "expired")
+
+    def test_claude_row_with_no_transcript_anywhere_reports_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tmp}):
+                emitted = self.build_one(self.claude_conv())
+        self.assertEqual(emitted["log"], "")
+        self.assertEqual(emitted["trace_source"], "missing")
+
+    def test_pi_rows_keep_selecting_their_session_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session = Path(tmp) / "session_sid-62.jsonl"
+            session.write_text("{}\n")
+            emitted = self.build_one(
+                {
+                    "status": "done",
+                    "provider": "pi",
+                    "model": "gpt-5.5",
+                    "session_id": "sid-62",
+                    "session_file": str(session),
+                    "cwd": "/tmp/repo",
+                    "session_dir": tmp,
+                    "last_run": {"run_id": "run-62"},
+                }
+            )
+        self.assertEqual(emitted["log"], str(session))
+        self.assertEqual(emitted["trace_source"], "session")
 
     def test_build_rows_emits_pi_session_file_as_resume_handle(self):
         state = {

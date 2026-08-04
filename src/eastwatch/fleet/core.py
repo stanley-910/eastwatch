@@ -62,6 +62,7 @@ class FleetRow:
     effort: str = ""
     run_id: str = ""
     journal: str = ""
+    trace_source: str = ""
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, object]) -> FleetRow:
@@ -92,6 +93,7 @@ class FleetRow:
             effort=str(raw.get("effort") or ""),
             run_id=str(raw.get("run_id") or ""),
             journal=str(raw.get("journal") or ""),
+            trace_source=str(raw.get("trace_source") or ""),
         )
 
 
