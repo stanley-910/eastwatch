@@ -169,7 +169,10 @@ class FleetLogTest(unittest.TestCase):
                     ]
                 },
             },
-            {"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}},
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "done"}]},
+            },
             {"type": "result", "subtype": "success"},
         ]
         for event in events:
@@ -227,7 +230,11 @@ class FleetLogTest(unittest.TestCase):
                 "role": "assistant",
                 "content": [
                     {"type": "text", "text": "working"},
-                    {"type": "toolCall", "name": "bash", "arguments": {"command": "git status"}},
+                    {
+                        "type": "toolCall",
+                        "name": "bash",
+                        "arguments": {"command": "git status"},
+                    },
                 ],
             },
         }
@@ -237,7 +244,10 @@ class FleetLogTest(unittest.TestCase):
     def test_bounds_completed_lines_and_partial_text(self):
         log = FleetLog("claude", max_lines=2, max_chars=12)
         for text in ("one", "two", "three"):
-            event = {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+            event = {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": text}]},
+            }
             log.feed_line(json.dumps(event))
         self.assertEqual(log.lines, ("two", "three"))
 
@@ -267,7 +277,9 @@ class ResumeCommandTest(unittest.TestCase):
             ),
         )
         pi = row(provider="pi", model_id="gpt-5.5", session="/tmp/pi session.json")
-        self.assertEqual(interactive_command(pi), ("pi", "--session", "/tmp/pi session.json"))
+        self.assertEqual(
+            interactive_command(pi), ("pi", "--session", "/tmp/pi session.json")
+        )
 
     def test_only_parked_or_crashed_nonlive_rows_resume(self):
         self.assertTrue(resume_eligible(row()))
@@ -288,7 +300,9 @@ class ResumeCommandTest(unittest.TestCase):
 
     def test_tmux_command_quotes_only_nested_shell_command(self):
         command = tmux_chat_command(row())
-        self.assertEqual(command[:5], ("tmux", "new-window", "-n", "chat-task-repo-62", "-c"))
+        self.assertEqual(
+            command[:5], ("tmux", "new-window", "-n", "chat-task-repo-62", "-c")
+        )
         self.assertEqual(command[5], "/tmp/repo with spaces")
         self.assertEqual(command[6], "claude --resume abc-123 --model sonnet")
         pane = tmux_chat_command(row(), pane=True)

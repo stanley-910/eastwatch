@@ -75,14 +75,20 @@ class StatePersistenceTest(unittest.TestCase):
         self.assertEqual(ps["vault_outbox"], {})
 
         ps["vault_observations"]["item-abc123"] = {"generation": "g", "status": "agent"}
-        ps["vault_outbox"]["gen-1"] = {"item_id": "item-abc123", "dispatched": False, "recorded_at": 1.0}
+        ps["vault_outbox"]["gen-1"] = {
+            "item_id": "item-abc123",
+            "dispatched": False,
+            "recorded_at": 1.0,
+        }
 
         watcher.save_state(state)
         loaded = watcher.load_state()
 
         self.assertEqual(loaded, state)
         restored = loaded["projects"]["local/vault-board"]
-        self.assertEqual(restored["vault_observations"]["item-abc123"]["status"], "agent")
+        self.assertEqual(
+            restored["vault_observations"]["item-abc123"]["status"], "agent"
+        )
         self.assertFalse(restored["vault_outbox"]["gen-1"]["dispatched"])
 
 

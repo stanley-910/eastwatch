@@ -140,7 +140,9 @@ class MRCommentFallbackTest(unittest.TestCase):
             "event_id": 100,
         }
 
-        watcher.assemble(gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"]
+        )
 
         key, conv = next(iter(ps["conversations"].items()))
         self.assertTrue(key.startswith("mr:46:note:99"))
@@ -243,13 +245,17 @@ class MRCommentFallbackTest(unittest.TestCase):
             "event_id": 100,
         }
 
-        watcher.assemble(gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"]
+        )
 
         self.assertEqual(len(ps["conversations"]), 1)
         key, conv = next(iter(ps["conversations"].items()))
         self.assertTrue(key.startswith("mr:46:note:99"))
         self.assertEqual(conv["anchor"], "mr")
-        self.assertEqual(conv["next_reply_target"], {"kind": "mr", "mr_iid": "46", "note_id": 99})
+        self.assertEqual(
+            conv["next_reply_target"], {"kind": "mr", "mr_iid": "46", "note_id": 99}
+        )
         prompt = conv["pending"][0]
         self.assertIn("MR title: Scheduler mailpit", prompt)
         self.assertIn("Source branch: feature/no-issue", prompt)
@@ -293,11 +299,15 @@ class MRCommentFallbackTest(unittest.TestCase):
             "event_id": 102,
         }
 
-        watcher.assemble(gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"]
+        )
 
         conv = ps["conversations"]["43"]
         self.assertEqual(conv["anchor"], "issue")
-        self.assertEqual(conv["next_reply_target"], {"kind": "mr", "mr_iid": "46", "note_id": 101})
+        self.assertEqual(
+            conv["next_reply_target"], {"kind": "mr", "mr_iid": "46", "note_id": 101}
+        )
         self.assertIn("MR title: Scheduler mailpit", conv["pending"][0])
         self.assertEqual(ps["mr_index"]["46"]["conversation_key"], "43")
 
@@ -323,7 +333,9 @@ class MRCommentFallbackTest(unittest.TestCase):
                 },
             }
         )
-        conv = watcher.make_conversation(gl, PROJ, issue, "qa", ["Issue body"], DEFAULTS)
+        conv = watcher.make_conversation(
+            gl, PROJ, issue, "qa", ["Issue body"], DEFAULTS
+        )
         ps = {
             "conversations": {"43": conv},
             "mr_index": {"46": {"conversation_key": "43"}},
@@ -348,17 +360,31 @@ class MRCommentFallbackTest(unittest.TestCase):
             "event_id": 204,
         }
 
-        watcher.assemble(gl, PROJ, ps, [mr_gesture], [], set(), "owner", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [mr_gesture], [], set(), "owner", DEFAULTS, ["mention"]
+        )
         self.assertEqual(
             conv["next_reply_target"],
-            {"kind": "mr", "mr_iid": "46", "note_id": 201, "discussion_id": "mr-discussion"},
+            {
+                "kind": "mr",
+                "mr_iid": "46",
+                "note_id": 201,
+                "discussion_id": "mr-discussion",
+            },
         )
         conv["reply_target"] = conv.pop("next_reply_target")
 
-        watcher.assemble(gl, PROJ, ps, [issue_gesture], [], set(), "owner", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [issue_gesture], [], set(), "owner", DEFAULTS, ["mention"]
+        )
         self.assertEqual(
             conv["next_reply_target"],
-            {"kind": "issue", "issue_iid": "43", "note_id": 203, "discussion_id": "issue-discussion"},
+            {
+                "kind": "issue",
+                "issue_iid": "43",
+                "note_id": 203,
+                "discussion_id": "issue-discussion",
+            },
         )
         conv["current_run"] = {"reply_target": conv.pop("next_reply_target")}
         watcher.collect_success(
@@ -367,14 +393,24 @@ class MRCommentFallbackTest(unittest.TestCase):
             ps,
             "43",
             conv,
-            {"reply": "Issue answer\nSTATUS: done", "session_file": "/tmp/session.jsonl"},
+            {
+                "reply": "Issue answer\nSTATUS: done",
+                "session_file": "/tmp/session.jsonl",
+            },
             {"projects": {"gitlab.example.com/group/project": ps}},
         )
 
-        self.assertEqual(gl.posts[-1][0], "projects/1/issues/43/discussions/issue-discussion/notes")
+        self.assertEqual(
+            gl.posts[-1][0], "projects/1/issues/43/discussions/issue-discussion/notes"
+        )
         self.assertEqual(
             conv["reply_target"],
-            {"kind": "issue", "issue_iid": "43", "note_id": 203, "discussion_id": "issue-discussion"},
+            {
+                "kind": "issue",
+                "issue_iid": "43",
+                "note_id": 203,
+                "discussion_id": "issue-discussion",
+            },
         )
 
     def test_mr_anchored_parked_answer_is_marked_done(self):
@@ -387,10 +423,16 @@ class MRCommentFallbackTest(unittest.TestCase):
             "web_url": "https://gitlab.example.com/group/project/-/merge_requests/46",
         }
         gl = FakeGitLab({"projects/1/merge_requests/46/discussions": []})
-        conv = watcher.make_mr_conversation(PROJ, mr, "mr:46:note:99", "qa", ["@agent question"], DEFAULTS)
+        conv = watcher.make_mr_conversation(
+            PROJ, mr, "mr:46:note:99", "qa", ["@agent question"], DEFAULTS
+        )
         conv["reply_target"] = {"kind": "mr", "mr_iid": "46", "note_id": 99}
         conv["current_run"] = {"reply_target": conv["reply_target"]}
-        ps = {"conversations": {"mr:46:note:99": conv}, "mr_index": {}, "pending_mr_comment_gestures": []}
+        ps = {
+            "conversations": {"mr:46:note:99": conv},
+            "mr_index": {},
+            "pending_mr_comment_gestures": [],
+        }
 
         watcher.collect_success(
             gl,
@@ -398,7 +440,10 @@ class MRCommentFallbackTest(unittest.TestCase):
             ps,
             "mr:46:note:99",
             conv,
-            {"reply": "Can you clarify the expected output?\nSTATUS: parked", "session_file": "/tmp/session.jsonl"},
+            {
+                "reply": "Can you clarify the expected output?\nSTATUS: parked",
+                "session_file": "/tmp/session.jsonl",
+            },
             {"projects": {"gitlab.example.com/group/project": ps}},
         )
 
@@ -444,7 +489,11 @@ class MRCommentFallbackTest(unittest.TestCase):
                     },
                 ],
                 "projects/1/issues/43/discussions": [
-                    {"id": "issue-discussion", "individual_note": False, "notes": [{"id": 501}]},
+                    {
+                        "id": "issue-discussion",
+                        "individual_note": False,
+                        "notes": [{"id": 501}],
+                    },
                 ],
                 "projects/1/issues/43/discussions/issue-top-level": {
                     "id": "issue-top-level",
@@ -452,7 +501,11 @@ class MRCommentFallbackTest(unittest.TestCase):
                     "notes": [{"id": 502}],
                 },
                 "projects/1/merge_requests/46/discussions": [
-                    {"id": "mr-discussion", "individual_note": False, "notes": [{"id": 601}]}
+                    {
+                        "id": "mr-discussion",
+                        "individual_note": False,
+                        "notes": [{"id": 601}],
+                    }
                 ],
             }
         )
@@ -464,7 +517,9 @@ class MRCommentFallbackTest(unittest.TestCase):
         self.assertEqual(gestures[1]["discussion_id"], "mr-discussion")
         self.assertIsNone(gestures[2]["discussion_id"])
 
-    def test_poll_comments_captures_unthreaded_when_discussion_lookup_is_transient(self):
+    def test_poll_comments_captures_unthreaded_when_discussion_lookup_is_transient(
+        self,
+    ):
         def fail_discussion_lookup(_path, **_params):
             raise watcher.requests.RequestException("discussion timeout")
 
@@ -512,8 +567,14 @@ class MRCommentFallbackTest(unittest.TestCase):
                 },
             }
         )
-        conv = watcher.make_conversation(gl, PROJ, issue, "qa", ["Issue body"], DEFAULTS)
-        ps = {"conversations": {"43": conv}, "mr_index": {}, "pending_mr_comment_gestures": []}
+        conv = watcher.make_conversation(
+            gl, PROJ, issue, "qa", ["Issue body"], DEFAULTS
+        )
+        ps = {
+            "conversations": {"43": conv},
+            "mr_index": {},
+            "pending_mr_comment_gestures": [],
+        }
         gesture = {
             "kind": "issue",
             "iid": "43",
@@ -524,10 +585,17 @@ class MRCommentFallbackTest(unittest.TestCase):
             "event_id": 301,
         }
 
-        watcher.assemble(gl, PROJ, ps, [gesture], [], set(), "stanwang", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [gesture], [], set(), "stanwang", DEFAULTS, ["mention"]
+        )
         self.assertEqual(
             conv["next_reply_target"],
-            {"kind": "issue", "issue_iid": "43", "note_id": 501, "discussion_id": "issue-discussion"},
+            {
+                "kind": "issue",
+                "issue_iid": "43",
+                "note_id": 501,
+                "discussion_id": "issue-discussion",
+            },
         )
         conv["current_run"] = {"reply_target": conv.pop("next_reply_target")}
         watcher.collect_success(
@@ -536,13 +604,20 @@ class MRCommentFallbackTest(unittest.TestCase):
             ps,
             "43",
             conv,
-            {"reply": "Issue thread answer\nSTATUS: done", "session_file": "/tmp/session.jsonl"},
+            {
+                "reply": "Issue thread answer\nSTATUS: done",
+                "session_file": "/tmp/session.jsonl",
+            },
             {"projects": {"gitlab.example.com/group/project": ps}},
         )
 
-        self.assertEqual(gl.posts[-1][0], "projects/1/issues/43/discussions/issue-discussion/notes")
+        self.assertEqual(
+            gl.posts[-1][0], "projects/1/issues/43/discussions/issue-discussion/notes"
+        )
 
-    def test_post_conversation_note_falls_back_to_top_level_when_discussion_lookup_is_transient(self):
+    def test_post_conversation_note_falls_back_to_top_level_when_discussion_lookup_is_transient(
+        self,
+    ):
         def fail_discussion_lookup(_path, **_params):
             raise watcher.requests.RequestException("discussion list timeout")
 
@@ -554,7 +629,9 @@ class MRCommentFallbackTest(unittest.TestCase):
         note = watcher.post_conversation_note(gl, PROJ, conv, "fallback body")
 
         self.assertEqual(note["id"], 1001)
-        self.assertEqual(gl.posts, [("projects/1/issues/43/notes", {"body": "fallback body"})])
+        self.assertEqual(
+            gl.posts, [("projects/1/issues/43/notes", {"body": "fallback body"})]
+        )
 
     def test_issue_discussion_post_failure_falls_back_to_top_level_note(self):
         issue = {
@@ -566,9 +643,13 @@ class MRCommentFallbackTest(unittest.TestCase):
         discussion_path = "projects/1/issues/43/discussions/issue-discussion/notes"
         gl = FakeGitLab(
             {"projects/1/issues/43/notes": [], "projects/1/issues/43/links": []},
-            post_errors={discussion_path: watcher.requests.RequestException("thread post failed")},
+            post_errors={
+                discussion_path: watcher.requests.RequestException("thread post failed")
+            },
         )
-        conv = watcher.make_conversation(gl, PROJ, issue, "qa", ["Issue body"], DEFAULTS)
+        conv = watcher.make_conversation(
+            gl, PROJ, issue, "qa", ["Issue body"], DEFAULTS
+        )
         conv["current_run"] = {
             "reply_target": {
                 "kind": "issue",
@@ -577,7 +658,11 @@ class MRCommentFallbackTest(unittest.TestCase):
                 "discussion_id": "issue-discussion",
             }
         }
-        ps = {"conversations": {"43": conv}, "mr_index": {}, "pending_mr_comment_gestures": []}
+        ps = {
+            "conversations": {"43": conv},
+            "mr_index": {},
+            "pending_mr_comment_gestures": [],
+        }
 
         watcher.collect_success(
             gl,
@@ -585,11 +670,17 @@ class MRCommentFallbackTest(unittest.TestCase):
             ps,
             "43",
             conv,
-            {"reply": "Issue thread answer\nSTATUS: done", "session_file": "/tmp/session.jsonl"},
+            {
+                "reply": "Issue thread answer\nSTATUS: done",
+                "session_file": "/tmp/session.jsonl",
+            },
             {"projects": {"gitlab.example.com/group/project": ps}},
         )
 
-        self.assertEqual([path for path, _data in gl.posts], [discussion_path, "projects/1/issues/43/notes"])
+        self.assertEqual(
+            [path for path, _data in gl.posts],
+            [discussion_path, "projects/1/issues/43/notes"],
+        )
         self.assertEqual(conv["last_note_id"], 1002)
 
     def test_find_note_discussion_id_verifies_payload_discussion_id_by_direct_get(self):
@@ -604,7 +695,9 @@ class MRCommentFallbackTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            watcher.find_note_discussion_id(gl, PROJ, "issue", "43", 501, "issue-discussion"),
+            watcher.find_note_discussion_id(
+                gl, PROJ, "issue", "43", 501, "issue-discussion"
+            ),
             "issue-discussion",
         )
         self.assertEqual(
@@ -617,7 +710,13 @@ class MRCommentFallbackTest(unittest.TestCase):
             {"id": f"decoy-{i}", "individual_note": False, "notes": [{"id": 1000 + i}]}
             for i in range(watcher.DISCUSSION_LIST_PER_PAGE)
         ]
-        page_two = [{"id": "target-discussion", "individual_note": False, "notes": [{"id": 501}]}]
+        page_two = [
+            {
+                "id": "target-discussion",
+                "individual_note": False,
+                "notes": [{"id": 501}],
+            }
+        ]
 
         def discussions(_path, **params):
             return page_one if params.get("page") == 1 else page_two
@@ -646,7 +745,9 @@ class MRCommentFallbackTest(unittest.TestCase):
             "web_url": "https://gitlab.example.com/group/project/-/merge_requests/46",
         }
         gl = FakeGitLab({})
-        conv = watcher.make_mr_conversation(PROJ, mr, "mr:46:note:601", "qa", ["@agent question"], DEFAULTS)
+        conv = watcher.make_mr_conversation(
+            PROJ, mr, "mr:46:note:601", "qa", ["@agent question"], DEFAULTS
+        )
         conv["reply_target"] = {
             "kind": "mr",
             "mr_iid": "46",
@@ -654,7 +755,11 @@ class MRCommentFallbackTest(unittest.TestCase):
             "discussion_id": "mr-discussion",
         }
         conv["current_run"] = {"reply_target": conv["reply_target"]}
-        ps = {"conversations": {"mr:46:note:601": conv}, "mr_index": {}, "pending_mr_comment_gestures": []}
+        ps = {
+            "conversations": {"mr:46:note:601": conv},
+            "mr_index": {},
+            "pending_mr_comment_gestures": [],
+        }
 
         watcher.collect_success(
             gl,
@@ -662,11 +767,17 @@ class MRCommentFallbackTest(unittest.TestCase):
             ps,
             "mr:46:note:601",
             conv,
-            {"reply": "MR thread answer\nSTATUS: done", "session_file": "/tmp/session.jsonl"},
+            {
+                "reply": "MR thread answer\nSTATUS: done",
+                "session_file": "/tmp/session.jsonl",
+            },
             {"projects": {"gitlab.example.com/group/project": ps}},
         )
 
-        self.assertEqual(gl.posts[-1][0], "projects/1/merge_requests/46/discussions/mr-discussion/notes")
+        self.assertEqual(
+            gl.posts[-1][0],
+            "projects/1/merge_requests/46/discussions/mr-discussion/notes",
+        )
 
     def test_mr_discussion_post_failure_falls_back_to_top_level_note(self):
         mr = {
@@ -680,9 +791,13 @@ class MRCommentFallbackTest(unittest.TestCase):
         discussion_path = "projects/1/merge_requests/46/discussions/mr-discussion/notes"
         gl = FakeGitLab(
             {},
-            post_errors={discussion_path: watcher.requests.RequestException("thread post failed")},
+            post_errors={
+                discussion_path: watcher.requests.RequestException("thread post failed")
+            },
         )
-        conv = watcher.make_mr_conversation(PROJ, mr, "mr:46:note:601", "qa", ["@agent question"], DEFAULTS)
+        conv = watcher.make_mr_conversation(
+            PROJ, mr, "mr:46:note:601", "qa", ["@agent question"], DEFAULTS
+        )
         conv["current_run"] = {
             "reply_target": {
                 "kind": "mr",
@@ -691,7 +806,11 @@ class MRCommentFallbackTest(unittest.TestCase):
                 "discussion_id": "mr-discussion",
             }
         }
-        ps = {"conversations": {"mr:46:note:601": conv}, "mr_index": {}, "pending_mr_comment_gestures": []}
+        ps = {
+            "conversations": {"mr:46:note:601": conv},
+            "mr_index": {},
+            "pending_mr_comment_gestures": [],
+        }
 
         watcher.collect_success(
             gl,
@@ -699,11 +818,17 @@ class MRCommentFallbackTest(unittest.TestCase):
             ps,
             "mr:46:note:601",
             conv,
-            {"reply": "MR thread answer\nSTATUS: done", "session_file": "/tmp/session.jsonl"},
+            {
+                "reply": "MR thread answer\nSTATUS: done",
+                "session_file": "/tmp/session.jsonl",
+            },
             {"projects": {"gitlab.example.com/group/project": ps}},
         )
 
-        self.assertEqual([path for path, _data in gl.posts], [discussion_path, "projects/1/merge_requests/46/notes"])
+        self.assertEqual(
+            [path for path, _data in gl.posts],
+            [discussion_path, "projects/1/merge_requests/46/notes"],
+        )
         self.assertEqual(conv["last_note_id"], 1002)
 
 
@@ -717,10 +842,16 @@ def _standalone_mr_conv(gl, answer_note_id=500):
         "target_branch": "main",
         "web_url": "https://gitlab.example.com/group/project/-/merge_requests/46",
     }
-    conv = watcher.make_mr_conversation(PROJ, mr, "mr:46:note:99", "qa", ["@agent original"], DEFAULTS)
+    conv = watcher.make_mr_conversation(
+        PROJ, mr, "mr:46:note:99", "qa", ["@agent original"], DEFAULTS
+    )
     conv["status"] = "done"
     conv["last_note_id"] = answer_note_id
-    ps = {"conversations": {"mr:46:note:99": conv}, "mr_index": {}, "pending_mr_comment_gestures": []}
+    ps = {
+        "conversations": {"mr:46:note:99": conv},
+        "mr_index": {},
+        "pending_mr_comment_gestures": [],
+    }
     return conv, ps
 
 
@@ -751,7 +882,9 @@ class StandaloneMRThreadResumeTest(unittest.TestCase):
             "event_id": 701,
         }
 
-        watcher.assemble(gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"]
+        )
 
         # No duplicate conversation, and the reply landed on the existing one.
         self.assertEqual(list(ps["conversations"]), ["mr:46:note:99"])
@@ -759,7 +892,12 @@ class StandaloneMRThreadResumeTest(unittest.TestCase):
         self.assertIn("does this handle retries?", conv["pending"][0])
         self.assertEqual(
             conv["next_reply_target"],
-            {"kind": "mr", "mr_iid": "46", "note_id": 700, "discussion_id": "mr-thread"},
+            {
+                "kind": "mr",
+                "mr_iid": "46",
+                "note_id": 700,
+                "discussion_id": "mr-thread",
+            },
         )
 
     def test_agent_reply_in_thread_does_not_spawn_duplicate(self):
@@ -781,7 +919,9 @@ class StandaloneMRThreadResumeTest(unittest.TestCase):
             "event_id": 701,
         }
 
-        watcher.assemble(gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"]
+        )
 
         self.assertEqual(list(ps["conversations"]), ["mr:46:note:99"])
         self.assertEqual(len(conv["pending"]), 1)
@@ -814,7 +954,9 @@ class StandaloneMRThreadResumeTest(unittest.TestCase):
             "event_id": 701,
         }
 
-        watcher.assemble(gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"]
+        )
 
         self.assertEqual(list(ps["conversations"]), ["mr:46:note:99"])
         self.assertEqual(len(conv["pending"]), 1)
@@ -822,7 +964,11 @@ class StandaloneMRThreadResumeTest(unittest.TestCase):
     def test_thread_reply_without_bot_note_is_not_resumed(self):
         # Owner replied under their own note (no bot note in the thread) -> the
         # thread is not the agent's answer thread, so we do not resume.
-        thread = {"id": "mr-thread", "individual_note": False, "notes": [{"id": 99}, {"id": 700}]}
+        thread = {
+            "id": "mr-thread",
+            "individual_note": False,
+            "notes": [{"id": 99}, {"id": 700}],
+        }
         gl = FakeGitLab(
             {
                 "projects/1/merge_requests/46/discussions/mr-thread": thread,
@@ -841,7 +987,9 @@ class StandaloneMRThreadResumeTest(unittest.TestCase):
             "event_id": 701,
         }
 
-        watcher.assemble(gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"]
+        )
 
         self.assertEqual(conv["pending"], [])
         self.assertNotIn("next_reply_target", conv)
@@ -860,14 +1008,18 @@ class StandaloneMRThreadResumeTest(unittest.TestCase):
             "event_id": 701,
         }
 
-        watcher.assemble(gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"]
+        )
 
         self.assertEqual(list(ps["conversations"]), ["mr:46:note:99"])
         self.assertEqual(conv["pending"], [])
         self.assertNotIn("next_reply_target", conv)
 
     def test_thread_reply_on_closed_mr_is_dropped(self):
-        gl = FakeGitLab({"projects/1/merge_requests/46/discussions/mr-thread": self.THREAD})
+        gl = FakeGitLab(
+            {"projects/1/merge_requests/46/discussions/mr-thread": self.THREAD}
+        )
         conv, ps = _standalone_mr_conv(gl)
         gesture = {
             "kind": "mr",
@@ -880,7 +1032,9 @@ class StandaloneMRThreadResumeTest(unittest.TestCase):
             "event_id": 701,
         }
 
-        watcher.assemble(gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"]
+        )
 
         self.assertEqual(conv["pending"], [])
         self.assertNotIn("next_reply_target", conv)
@@ -889,7 +1043,9 @@ class StandaloneMRThreadResumeTest(unittest.TestCase):
         def fail_lookup(_path, **_params):
             raise watcher.requests.RequestException("discussion unavailable")
 
-        gl = FakeGitLab({"projects/1/merge_requests/46/discussions/mr-thread": fail_lookup})
+        gl = FakeGitLab(
+            {"projects/1/merge_requests/46/discussions/mr-thread": fail_lookup}
+        )
         conv, ps = _standalone_mr_conv(gl)
         gesture = {
             "kind": "mr",
@@ -902,7 +1058,9 @@ class StandaloneMRThreadResumeTest(unittest.TestCase):
             "event_id": 701,
         }
 
-        watcher.assemble(gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"])
+        watcher.assemble(
+            gl, PROJ, ps, [gesture], [], set(), "owner", DEFAULTS, ["mention"]
+        )
 
         self.assertEqual(conv["pending"], [])
         self.assertNotIn("next_reply_target", conv)

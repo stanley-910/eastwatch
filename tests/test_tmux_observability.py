@@ -1,4 +1,5 @@
 """Tests for tmux-hosted workers, streaming, and the fleet-status emitter."""
+
 import atexit
 import json
 import os
@@ -25,7 +26,9 @@ atexit.register(lambda: shutil.rmtree(TMP_ROOT, ignore_errors=True))
 class SessionNameTest(unittest.TestCase):
     def test_derived_from_session_dir_basename(self):
         conv = {"session_dir": "/x/convos/example-org-example-repo-73"}
-        self.assertEqual(watcher.tmux_session_name(conv), "task-example-org-example-repo-73")
+        self.assertEqual(
+            watcher.tmux_session_name(conv), "task-example-org-example-repo-73"
+        )
 
     def test_unsafe_chars_folded(self):
         conv = {"session_dir": "/x/convos/grp-repo-mr-5-note:99.beta"}
@@ -94,7 +97,9 @@ class TmuxLaunchTest(unittest.TestCase):
             )
 
         command = run.call_args.args[0]
-        self.assertEqual(command[:6], ["/usr/bin/tmux", "new-session", "-d", "-s", "task-x", "-c"])
+        self.assertEqual(
+            command[:6], ["/usr/bin/tmux", "new-session", "-d", "-s", "task-x", "-c"]
+        )
         self.assertIn('set-option -pt "$TMUX_PANE" remain-on-exit on', command[-1])
         self.assertIn('set-option -pt "$TMUX_PANE" @agent_worktree /tmp', command[-1])
         self.assertIn("exec python watcher.py --worker /tmp/request.json", command[-1])
@@ -179,11 +184,15 @@ class TmuxLaunchTest(unittest.TestCase):
                 "XDG_CONFIG_HOME": explicit_xdg,
                 "PI_CODING_AGENT_DIR": explicit_pi,
             }
-            completed = subprocess.CompletedProcess([str(fake_tmux)], 0, stdout="", stderr="")
+            completed = subprocess.CompletedProcess(
+                [str(fake_tmux)], 0, stdout="", stderr=""
+            )
             with (
                 mock.patch.object(watcher, "tmux_bin", return_value=str(fake_tmux)),
                 mock.patch.object(watcher, "tmux_kill_session"),
-                mock.patch.object(watcher.subprocess, "run", return_value=completed) as run,
+                mock.patch.object(
+                    watcher.subprocess, "run", return_value=completed
+                ) as run,
             ):
                 watcher.tmux_launch_worker(
                     "task-x",
@@ -280,15 +289,27 @@ class ClaudeStreamCollectorTest(unittest.TestCase):
     def test_jsonl_last_result_event(self):
         lines = [
             {"type": "system", "subtype": "init", "session_id": "s1"},
-            {"type": "assistant", "message": {"content": [{"type": "text", "text": "thinking"}]}},
-            {"type": "result", "subtype": "success", "result": "hi", "session_id": "s1"},
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "thinking"}]},
+            },
+            {
+                "type": "result",
+                "subtype": "success",
+                "result": "hi",
+                "session_id": "s1",
+            },
         ]
-        result = self.collect("\n".join(json.dumps(line) for line in lines) + "\n").result()
+        result = self.collect(
+            "\n".join(json.dumps(line) for line in lines) + "\n"
+        ).result()
         self.assertEqual(result["result"], "hi")
         self.assertEqual(result["session_id"], "s1")
 
     def test_blank_lines_ignored(self):
-        collector = self.collect('\n{"type":"result","result":"x","session_id":"s"}\n\n')
+        collector = self.collect(
+            '\n{"type":"result","result":"x","session_id":"s"}\n\n'
+        )
         self.assertEqual(collector.result()["result"], "x")
 
     def test_no_result_raises_indexerror(self):
@@ -310,8 +331,10 @@ class DrainProcessTest(unittest.TestCase):
         req = self._req()
         proc = subprocess.Popen(
             ["/bin/sh", "-c", "printf 'a\\nb\\n'; printf 'oops\\n' 1>&2"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True, close_fds=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+            close_fds=True,
         )
         code, collector = watcher.drain_process(proc, req, 10)
         self.assertEqual(code, 0)
@@ -325,8 +348,10 @@ class DrainProcessTest(unittest.TestCase):
         req = self._req()
         proc = subprocess.Popen(
             ["/bin/sh", "-c", "sleep 30"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True, close_fds=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+            close_fds=True,
         )
         start = time.time()
         with self.assertRaises(watcher.WorkerCommandError) as ctx:
@@ -374,11 +399,18 @@ class DrainProcessTest(unittest.TestCase):
                 collector=collector,
             )
 
-        facts = [json.loads(line) for line in Path(req["journal_path"]).read_text().splitlines()]
-        self.assertEqual([fact["type"] for fact in facts], ["session_discovered", "timeout"])
+        facts = [
+            json.loads(line)
+            for line in Path(req["journal_path"]).read_text().splitlines()
+        ]
+        self.assertEqual(
+            [fact["type"] for fact in facts], ["session_discovered", "timeout"]
+        )
 
     def _pi_process(self, events: list[dict], *, tail: str = "time.sleep(30)"):
-        writes = "\n".join(f"print({json.dumps(event)!r}, flush=True)" for event in events)
+        writes = "\n".join(
+            f"print({json.dumps(event)!r}, flush=True)" for event in events
+        )
         return subprocess.Popen(
             [sys.executable, "-c", f"import time\n{writes}\n{tail}"],
             stdout=subprocess.PIPE,
@@ -390,14 +422,20 @@ class DrainProcessTest(unittest.TestCase):
     def test_pi_settled_error_terminates_leaked_process_for_recovery(self):
         req = self._req()
         req["pi_settled_exit_grace_seconds"] = 0.1
-        proc = self._pi_process([
-            {
-                "type": "message_end",
-                "message": {"role": "assistant", "stopReason": "error", "errorMessage": "api error"},
-            },
-            {"type": "agent_end", "willRetry": False},
-            {"type": "agent_settled"},
-        ])
+        proc = self._pi_process(
+            [
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "stopReason": "error",
+                        "errorMessage": "api error",
+                    },
+                },
+                {"type": "agent_end", "willRetry": False},
+                {"type": "agent_settled"},
+            ]
+        )
 
         start = time.time()
         code, _, err = watcher.finish_provider_process(proc, req, 10)
@@ -411,13 +449,17 @@ class DrainProcessTest(unittest.TestCase):
         req = self._req()
         req["pi_settled_exit_grace_seconds"] = 0.1
         proc = self._pi_process([])
-        prefix = b"\n".join([
-            json.dumps({"type": "agent_end", "willRetry": False}).encode(),
-            json.dumps({"type": "agent_settled"}).encode(),
-            b"",
-        ])
+        prefix = b"\n".join(
+            [
+                json.dumps({"type": "agent_end", "willRetry": False}).encode(),
+                json.dumps({"type": "agent_settled"}).encode(),
+                b"",
+            ]
+        )
 
-        code, _, err = watcher.finish_provider_process(proc, req, 10, stdout_prefix=prefix)
+        code, _, err = watcher.finish_provider_process(
+            proc, req, 10, stdout_prefix=prefix
+        )
 
         self.assertNotEqual(code, 0)
         self.assertIn("[pi-settled-safeguard]", err)
@@ -425,18 +467,20 @@ class DrainProcessTest(unittest.TestCase):
     def test_pi_settled_success_terminates_leak_but_preserves_success(self):
         req = self._req()
         req["pi_settled_exit_grace_seconds"] = 0.1
-        proc = self._pi_process([
-            {
-                "type": "message_end",
-                "message": {
-                    "role": "assistant",
-                    "stopReason": "stop",
-                    "content": [{"type": "text", "text": "finished\nSTATUS: done"}],
+        proc = self._pi_process(
+            [
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "stopReason": "stop",
+                        "content": [{"type": "text", "text": "finished\nSTATUS: done"}],
+                    },
                 },
-            },
-            {"type": "agent_end", "willRetry": False},
-            {"type": "agent_settled"},
-        ])
+                {"type": "agent_end", "willRetry": False},
+                {"type": "agent_settled"},
+            ]
+        )
 
         code, out, err = watcher.finish_provider_process(proc, req, 10)
 
@@ -451,7 +495,11 @@ class DrainProcessTest(unittest.TestCase):
             [
                 {
                     "type": "message_end",
-                    "message": {"role": "assistant", "stopReason": "error", "errorMessage": "api error"},
+                    "message": {
+                        "role": "assistant",
+                        "stopReason": "error",
+                        "errorMessage": "api error",
+                    },
                 },
                 {"type": "agent_end", "willRetry": False},
                 {"type": "agent_settled"},
@@ -489,7 +537,9 @@ class DrainProcessTest(unittest.TestCase):
             {"type": "agent_end", "willRetry": False},
             {"type": "agent_settled"},
         ]
-        writes = "\n".join(f"print({json.dumps(event)!r}, flush=True)" for event in events)
+        writes = "\n".join(
+            f"print({json.dumps(event)!r}, flush=True)" for event in events
+        )
         script = (
             f"import time\n{writes}\n"
             "time.sleep(0.05)\n"
@@ -512,14 +562,22 @@ class DrainProcessTest(unittest.TestCase):
     def test_activity_before_settled_clears_stale_success_outcome(self):
         req = self._req()
         req["pi_settled_exit_grace_seconds"] = 0.1
-        proc = self._pi_process([
-            {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}},
-            {"type": "agent_end", "willRetry": False},
-            {"type": "agent_start"},
-            {"type": "message_end", "message": {"role": "assistant", "stopReason": "length"}},
-            {"type": "agent_end", "willRetry": False},
-            {"type": "agent_settled"},
-        ])
+        proc = self._pi_process(
+            [
+                {
+                    "type": "message_end",
+                    "message": {"role": "assistant", "stopReason": "stop"},
+                },
+                {"type": "agent_end", "willRetry": False},
+                {"type": "agent_start"},
+                {
+                    "type": "message_end",
+                    "message": {"role": "assistant", "stopReason": "length"},
+                },
+                {"type": "agent_end", "willRetry": False},
+                {"type": "agent_settled"},
+            ]
+        )
 
         code, _, err = watcher.finish_provider_process(proc, req, 10)
 
@@ -567,11 +625,15 @@ class FleetStatusDerivedTest(unittest.TestCase):
 
     def test_working_when_session_alive(self):
         conv = {"status": "working", "current_run": {"tmux_session": "task-x"}}
-        self.assertEqual(self.fs.derived_state(conv, conv["current_run"], True), "working")
+        self.assertEqual(
+            self.fs.derived_state(conv, conv["current_run"], True), "working"
+        )
 
     def test_crashed_when_session_gone(self):
         conv = {"status": "working", "current_run": {"tmux_session": "task-x"}}
-        self.assertEqual(self.fs.derived_state(conv, conv["current_run"], False), "crashed")
+        self.assertEqual(
+            self.fs.derived_state(conv, conv["current_run"], False), "crashed"
+        )
 
     def test_finishing_when_success_artifact_exists_after_session_exits(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -586,16 +648,34 @@ class FleetStatusDerivedTest(unittest.TestCase):
 
     def test_queued_before_launch(self):
         run = {"launch_state": "launching"}
-        self.assertEqual(self.fs.derived_state({"status": "working"}, run, False), "queued")
+        self.assertEqual(
+            self.fs.derived_state({"status": "working"}, run, False), "queued"
+        )
 
     def test_parked_input_vs_review(self):
-        self.assertEqual(self.fs.derived_state({"status": "parked", "anchor": "issue"}, None, False), "parked-input")
-        self.assertEqual(self.fs.derived_state({"status": "parked", "anchor": "mr"}, None, False), "parked-review")
+        self.assertEqual(
+            self.fs.derived_state({"status": "parked", "anchor": "issue"}, None, False),
+            "parked-input",
+        )
+        self.assertEqual(
+            self.fs.derived_state({"status": "parked", "anchor": "mr"}, None, False),
+            "parked-review",
+        )
 
     def test_summarize_assistant_and_tool(self):
-        text_ev = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "hello world"}]}})
+        text_ev = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "hello world"}]},
+            }
+        )
         self.assertTrue(self.fs.summarize_line(text_ev).startswith("assistant: hello"))
-        tool_ev = json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash"}]}})
+        tool_ev = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "tool_use", "name": "Bash"}]},
+            }
+        )
         self.assertEqual(self.fs.summarize_line(tool_ev), "tool: Bash")
         # Both providers emit pure JSONL, so a non-JSON line is a partial mid-write
         # and must be skipped (not surfaced as raw bytes / base64).
@@ -604,16 +684,32 @@ class FleetStatusDerivedTest(unittest.TestCase):
     def test_summarize_pi_tool_from_execution_start(self):
         # pi's resolved tool call is the top-level tool_execution_start event; the
         # message_update toolcall_* deltas are noise and must summarize to None.
-        ev = json.dumps({"type": "tool_execution_start", "toolName": "bash",
-                         "args": {"command": "git status"}})
+        ev = json.dumps(
+            {
+                "type": "tool_execution_start",
+                "toolName": "bash",
+                "args": {"command": "git status"},
+            }
+        )
         self.assertEqual(self.fs.summarize_line(ev), "tool: bash git status")
-        delta = json.dumps({"type": "message_update",
-                            "assistantMessageEvent": {"type": "toolcall_delta", "delta": "{\""}})
+        delta = json.dumps(
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {"type": "toolcall_delta", "delta": '{"'},
+            }
+        )
         self.assertIsNone(self.fs.summarize_line(delta))
 
     def test_model_label_self_identifying(self):
-        self.assertEqual(self.fs.model_label({"provider": "claude", "model": "opus"}), "claude:opus")
-        self.assertEqual(self.fs.model_label({"provider": "pi", "model": "gpt-5.5", "effort": "high"}), "pi:gpt-5.5:high")
+        self.assertEqual(
+            self.fs.model_label({"provider": "claude", "model": "opus"}), "claude:opus"
+        )
+        self.assertEqual(
+            self.fs.model_label(
+                {"provider": "pi", "model": "gpt-5.5", "effort": "high"}
+            ),
+            "pi:gpt-5.5:high",
+        )
 
     def test_run_completed_at_reads_existing_result_artifact(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -707,22 +803,31 @@ class FleetStatusDerivedTest(unittest.TestCase):
             journal_path = Path(tmp) / "run.jsonl"
             session_path = Path(tmp) / "session.jsonl"
             session_path.write_text('{"type":"session"}\n')
-            journal_path.write_text("\n".join([
-                json.dumps({
-                    "v": 1,
-                    "ts": 1,
-                    "run_id": "run-62",
-                    "type": "session_discovered",
-                    "session_file": str(session_path),
-                }),
-                json.dumps({
-                    "v": 1,
-                    "ts": 2,
-                    "run_id": "run-62",
-                    "type": "tool_first_started",
-                    "tool": "bash",
-                }),
-            ]) + "\n")
+            journal_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "v": 1,
+                                "ts": 1,
+                                "run_id": "run-62",
+                                "type": "session_discovered",
+                                "session_file": str(session_path),
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "v": 1,
+                                "ts": 2,
+                                "run_id": "run-62",
+                                "type": "tool_first_started",
+                                "tool": "bash",
+                            }
+                        ),
+                    ]
+                )
+                + "\n"
+            )
             state = {
                 "projects": {
                     "gitlab.example/group/repo": {
@@ -745,8 +850,12 @@ class FleetStatusDerivedTest(unittest.TestCase):
             }
             with (
                 mock.patch.object(self.fs, "load_state", return_value=state),
-                mock.patch.object(self.fs, "live_tmux_sessions", return_value={"task-repo-62"}),
-                mock.patch.object(self.fs, "running_tmux_sessions", return_value={"task-repo-62"}),
+                mock.patch.object(
+                    self.fs, "live_tmux_sessions", return_value={"task-repo-62"}
+                ),
+                mock.patch.object(
+                    self.fs, "running_tmux_sessions", return_value={"task-repo-62"}
+                ),
             ):
                 built = self.fs.build_rows()
 
@@ -799,30 +908,71 @@ class FleetStatusDerivedTest(unittest.TestCase):
 
 class RenderStreamLineTest(unittest.TestCase):
     def test_assistant_text(self):
-        ev = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "hello there"}]}})
+        ev = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "hello there"}]},
+            }
+        )
         self.assertEqual(watcher.render_stream_line(ev), "hello there\n")
 
     def test_thinking_and_tool(self):
-        think = json.dumps({"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "hmm"}]}})
+        think = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "thinking", "thinking": "hmm"}]},
+            }
+        )
         self.assertEqual(watcher.render_stream_line(think), "· thinking…\n")
-        tool = json.dumps({"type": "assistant", "message": {"content": [
-            {"type": "tool_use", "name": "Bash", "input": {"command": "git status"}}]}})
+        tool = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Bash",
+                            "input": {"command": "git status"},
+                        }
+                    ]
+                },
+            }
+        )
         self.assertEqual(watcher.render_stream_line(tool), "→ Bash git status\n")
 
     def test_result_and_dropped_events(self):
-        self.assertEqual(watcher.render_stream_line(json.dumps({"type": "result", "subtype": "success"})), "── success\n")
+        self.assertEqual(
+            watcher.render_stream_line(
+                json.dumps({"type": "result", "subtype": "success"})
+            ),
+            "── success\n",
+        )
         # system / rate_limit / unparseable are dropped from the pane
-        self.assertIsNone(watcher.render_stream_line(json.dumps({"type": "system", "subtype": "init"})))
+        self.assertIsNone(
+            watcher.render_stream_line(
+                json.dumps({"type": "system", "subtype": "init"})
+            )
+        )
         self.assertIsNone(watcher.render_stream_line("not json at all"))
         self.assertIsNone(watcher.render_stream_line(""))
 
     def test_tool_detail_truncated(self):
         long = "x" * (watcher.PANE_DETAIL_MAX + 200)
-        ev = json.dumps({"type": "assistant", "message": {"content": [
-            {"type": "tool_use", "name": "Bash", "input": {"command": long}}]}})
+        ev = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "name": "Bash", "input": {"command": long}}
+                    ]
+                },
+            }
+        )
         out = watcher.render_stream_line(ev)
         self.assertTrue(out.startswith("→ Bash "))
-        self.assertLessEqual(len(out.rstrip()), len("→ Bash ") + watcher.PANE_DETAIL_MAX)
+        self.assertLessEqual(
+            len(out.rstrip()), len("→ Bash ") + watcher.PANE_DETAIL_MAX
+        )
 
 
 class RenderPiLineTest(unittest.TestCase):
@@ -830,42 +980,82 @@ class RenderPiLineTest(unittest.TestCase):
         return json.dumps({"type": "message_update", "assistantMessageEvent": ame})
 
     def test_text_delta_inline_no_newline(self):
-        self.assertEqual(watcher.render_pi_line(self._upd({"type": "text_delta", "delta": "HEL"})), "HEL")
-        self.assertEqual(watcher.render_pi_line(self._upd({"type": "text_delta", "delta": "LO"})), "LO")
+        self.assertEqual(
+            watcher.render_pi_line(self._upd({"type": "text_delta", "delta": "HEL"})),
+            "HEL",
+        )
+        self.assertEqual(
+            watcher.render_pi_line(self._upd({"type": "text_delta", "delta": "LO"})),
+            "LO",
+        )
 
     def test_thinking_and_end(self):
-        self.assertEqual(watcher.render_pi_line(self._upd({"type": "thinking_start"})), "· thinking…\n")
-        self.assertEqual(watcher.render_pi_line(self._upd({"type": "text_end", "content": "HELLO"})), "\n")
-        self.assertEqual(watcher.render_pi_line(json.dumps({"type": "agent_end"})), "── done\n")
+        self.assertEqual(
+            watcher.render_pi_line(self._upd({"type": "thinking_start"})),
+            "· thinking…\n",
+        )
+        self.assertEqual(
+            watcher.render_pi_line(self._upd({"type": "text_end", "content": "HELLO"})),
+            "\n",
+        )
+        self.assertEqual(
+            watcher.render_pi_line(json.dumps({"type": "agent_end"})), "── done\n"
+        )
 
     def test_tool_rendered_from_tool_execution_start(self):
         # The resolved tool call is the top-level tool_execution_start event, which
         # carries toolName + full args — render name + a salient arg.
-        ev = json.dumps({"type": "tool_execution_start", "toolName": "bash",
-                         "args": {"command": "git status"}})
+        ev = json.dumps(
+            {
+                "type": "tool_execution_start",
+                "toolName": "bash",
+                "args": {"command": "git status"},
+            }
+        )
         self.assertEqual(watcher.render_pi_line(ev), "→ bash git status\n")
-        readev = json.dumps({"type": "tool_execution_start", "toolName": "read",
-                             "args": {"file": "AGENTS.md"}})
+        readev = json.dumps(
+            {
+                "type": "tool_execution_start",
+                "toolName": "read",
+                "args": {"file": "AGENTS.md"},
+            }
+        )
         self.assertEqual(watcher.render_pi_line(readev), "→ read AGENTS.md\n")
-        todoev = json.dumps({"type": "tool_execution_start", "toolName": "todo",
-                             "args": {"action": "complete"}})
+        todoev = json.dumps(
+            {
+                "type": "tool_execution_start",
+                "toolName": "todo",
+                "args": {"action": "complete"},
+            }
+        )
         self.assertEqual(watcher.render_pi_line(todoev), "→ todo complete\n")
 
     def test_tool_detail_truncated(self):
-        ev = json.dumps({"type": "tool_execution_start", "toolName": "bash",
-                         "args": {"command": "x" * (watcher.PANE_DETAIL_MAX + 200)}})
+        ev = json.dumps(
+            {
+                "type": "tool_execution_start",
+                "toolName": "bash",
+                "args": {"command": "x" * (watcher.PANE_DETAIL_MAX + 200)},
+            }
+        )
         out = watcher.render_pi_line(ev)
         self.assertTrue(out.startswith("→ bash "))
-        self.assertLessEqual(len(out.rstrip()), len("→ bash ") + watcher.PANE_DETAIL_MAX)
+        self.assertLessEqual(
+            len(out.rstrip()), len("→ bash ") + watcher.PANE_DETAIL_MAX
+        )
 
     def test_toolcall_deltas_are_noise(self):
         # message_update toolcall_* events stream arg JSON char-by-char — must NOT
         # render (this was the blank-then-flooded '→ tool' pane bug).
         for at in ("toolcall_start", "toolcall_delta", "toolcall_end"):
-            self.assertIsNone(watcher.render_pi_line(self._upd({"type": at, "delta": "{\""})), at)
+            self.assertIsNone(
+                watcher.render_pi_line(self._upd({"type": at, "delta": '{"'})), at
+            )
 
     def test_noise_events_dropped(self):
-        self.assertIsNone(watcher.render_pi_line(json.dumps({"type": "session", "id": "x"})))
+        self.assertIsNone(
+            watcher.render_pi_line(json.dumps({"type": "session", "id": "x"}))
+        )
         self.assertIsNone(watcher.render_pi_line(json.dumps({"type": "turn_start"})))
         self.assertIsNone(watcher.render_pi_line("not json"))
 
@@ -887,28 +1077,66 @@ class PiStreamCollectorReplyTest(unittest.TestCase):
         return collector
 
     def test_reply_from_last_assistant_message_end(self):
-        collector = self.collect([
-            {"type": "session", "id": "s"},
-            {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "HEL"}},
-            {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "LO"}},
-            {"type": "message_end", "message": {"role": "assistant", "content": [
-                {"type": "thinking", "thinking": ""}, {"type": "text", "text": "HELLO"}]}},
-            {"type": "agent_end"},
-        ])
+        collector = self.collect(
+            [
+                {"type": "session", "id": "s"},
+                {
+                    "type": "message_update",
+                    "assistantMessageEvent": {"type": "text_delta", "delta": "HEL"},
+                },
+                {
+                    "type": "message_update",
+                    "assistantMessageEvent": {"type": "text_delta", "delta": "LO"},
+                },
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "thinking", "thinking": ""},
+                            {"type": "text", "text": "HELLO"},
+                        ],
+                    },
+                },
+                {"type": "agent_end"},
+            ]
+        )
         self.assertEqual(collector.reply, "HELLO")
 
     def test_falls_back_to_deltas_if_no_message_end(self):
-        collector = self.collect([
-            {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "par"}},
-            {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "tial"}},
-        ])
+        collector = self.collect(
+            [
+                {
+                    "type": "message_update",
+                    "assistantMessageEvent": {"type": "text_delta", "delta": "par"},
+                },
+                {
+                    "type": "message_update",
+                    "assistantMessageEvent": {"type": "text_delta", "delta": "tial"},
+                },
+            ]
+        )
         self.assertEqual(collector.reply, "partial")
 
     def test_ignores_user_message_end(self):
-        collector = self.collect([
-            {"type": "message_end", "message": {"role": "user", "content": [{"type": "text", "text": "the question"}]}},
-            {"type": "message_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "the answer"}]}},
-        ])
+        collector = self.collect(
+            [
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "the question"}],
+                    },
+                },
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "the answer"}],
+                    },
+                },
+            ]
+        )
         self.assertEqual(collector.reply, "the answer")
 
 
@@ -919,7 +1147,9 @@ class PaneWriterTest(unittest.TestCase):
         sink = io.StringIO()
         pw = watcher.PaneWriter(sink, watcher.render_stream_line)
         # a JSONL event split across two feeds — nothing until the newline arrives
-        first = '{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}'
+        first = (
+            '{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}'
+        )
         pw.feed(first[:20])
         self.assertEqual(sink.getvalue(), "")  # partial line not rendered
         pw.feed(first[20:] + "\n")
@@ -930,7 +1160,9 @@ class PaneWriterTest(unittest.TestCase):
         import io
 
         sink = io.StringIO()
-        writer = watcher.PaneWriter(sink, watcher.render_stream_line, max_buffer_chars=100)
+        writer = watcher.PaneWriter(
+            sink, watcher.render_stream_line, max_buffer_chars=100
+        )
         writer.feed("x" * 101)
         self.assertEqual(writer.buf, "")
         self.assertTrue(writer.discarding_line)

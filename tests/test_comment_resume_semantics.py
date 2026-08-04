@@ -50,7 +50,9 @@ def conv():
 
 
 def assemble_once(gl, ps, gesture, triggers=("mention",)):
-    watcher.assemble(gl, PROJ, ps, [gesture], [], set(), "stanwang", DEFAULTS, list(triggers))
+    watcher.assemble(
+        gl, PROJ, ps, [gesture], [], set(), "stanwang", DEFAULTS, list(triggers)
+    )
 
 
 def http_error(status_code):
@@ -62,8 +64,18 @@ def http_error(status_code):
 class CommentResumeSemanticsTest(unittest.TestCase):
     def test_closed_issue_plain_comment_is_ignored(self):
         existing = conv()
-        ps = {"conversations": {"20": existing}, "mr_index": {}, "pending_mr_comment_gestures": []}
-        gesture = {"kind": "issue", "iid": "20", "body": "bookkeeping", "issue_state": "closed", "note_id": 1}
+        ps = {
+            "conversations": {"20": existing},
+            "mr_index": {},
+            "pending_mr_comment_gestures": [],
+        }
+        gesture = {
+            "kind": "issue",
+            "iid": "20",
+            "body": "bookkeeping",
+            "issue_state": "closed",
+            "note_id": 1,
+        }
 
         assemble_once(FakeGitLab({}), ps, gesture)
 
@@ -72,8 +84,18 @@ class CommentResumeSemanticsTest(unittest.TestCase):
 
     def test_open_issue_top_level_plain_comment_is_ignored(self):
         existing = conv()
-        ps = {"conversations": {"20": existing}, "mr_index": {}, "pending_mr_comment_gestures": []}
-        gesture = {"kind": "issue", "iid": "20", "body": "top level", "issue_state": "opened", "note_id": 2}
+        ps = {
+            "conversations": {"20": existing},
+            "mr_index": {},
+            "pending_mr_comment_gestures": [],
+        }
+        gesture = {
+            "kind": "issue",
+            "iid": "20",
+            "body": "top level",
+            "issue_state": "opened",
+            "note_id": 2,
+        }
 
         assemble_once(FakeGitLab({}), ps, gesture)
 
@@ -82,7 +104,11 @@ class CommentResumeSemanticsTest(unittest.TestCase):
 
     def test_issue_plain_reply_in_bot_note_discussion_resumes(self):
         existing = conv()
-        ps = {"conversations": {"20": existing}, "mr_index": {}, "pending_mr_comment_gestures": []}
+        ps = {
+            "conversations": {"20": existing},
+            "mr_index": {},
+            "pending_mr_comment_gestures": [],
+        }
         gl = FakeGitLab(
             {
                 "projects/1/issues/20/discussions/bot-thread": {
@@ -105,12 +131,21 @@ class CommentResumeSemanticsTest(unittest.TestCase):
         self.assertEqual(existing["pending"], ["reply in bot thread"])
         self.assertEqual(
             existing["next_reply_target"],
-            {"kind": "issue", "issue_iid": "20", "note_id": 11, "discussion_id": "bot-thread"},
+            {
+                "kind": "issue",
+                "issue_iid": "20",
+                "note_id": 11,
+                "discussion_id": "bot-thread",
+            },
         )
 
     def test_issue_plain_reply_discussion_lookup_failure_is_deferred(self):
         existing = conv()
-        ps = {"conversations": {"20": existing}, "mr_index": {}, "pending_mr_comment_gestures": []}
+        ps = {
+            "conversations": {"20": existing},
+            "mr_index": {},
+            "pending_mr_comment_gestures": [],
+        }
 
         def fail_lookup():
             raise watcher.requests.RequestException("discussion unavailable")
@@ -136,13 +171,26 @@ class CommentResumeSemanticsTest(unittest.TestCase):
         for state in ("opened", "closed"):
             with self.subTest(state=state):
                 existing = conv()
-                ps = {"conversations": {"20": existing}, "mr_index": {}, "pending_mr_comment_gestures": []}
-                gesture = {"kind": "issue", "iid": "20", "body": "@agent please continue", "issue_state": state, "note_id": 3}
+                ps = {
+                    "conversations": {"20": existing},
+                    "mr_index": {},
+                    "pending_mr_comment_gestures": [],
+                }
+                gesture = {
+                    "kind": "issue",
+                    "iid": "20",
+                    "body": "@agent please continue",
+                    "issue_state": state,
+                    "note_id": 3,
+                }
 
                 assemble_once(FakeGitLab({}), ps, gesture)
 
                 self.assertEqual(existing["pending"], ["please continue"])
-                self.assertEqual(existing["next_reply_target"], {"kind": "issue", "issue_iid": "20", "note_id": 3})
+                self.assertEqual(
+                    existing["next_reply_target"],
+                    {"kind": "issue", "issue_iid": "20", "note_id": 3},
+                )
 
     def test_closed_mr_plain_comment_is_ignored(self):
         for state in ("merged", "closed"):
@@ -215,7 +263,10 @@ class CommentResumeSemanticsTest(unittest.TestCase):
 
         assemble_once(gl, ps, gesture)
 
-        self.assertEqual(existing["pending"], ["Owner commented on merge request !7:\n\nreply in bot thread"])
+        self.assertEqual(
+            existing["pending"],
+            ["Owner commented on merge request !7:\n\nreply in bot thread"],
+        )
         self.assertEqual(
             existing["next_reply_target"],
             {"kind": "mr", "mr_iid": "7", "note_id": 71, "discussion_id": "bot-thread"},
@@ -232,7 +283,9 @@ class CommentResumeSemanticsTest(unittest.TestCase):
         def fail_lookup():
             raise watcher.requests.RequestException("discussion unavailable")
 
-        gl = FakeGitLab({"projects/1/merge_requests/7/discussions/bot-thread": fail_lookup})
+        gl = FakeGitLab(
+            {"projects/1/merge_requests/7/discussions/bot-thread": fail_lookup}
+        )
         gesture = {
             "kind": "mr",
             "mr_iid": "7",
@@ -261,7 +314,9 @@ class CommentResumeSemanticsTest(unittest.TestCase):
         def missing_discussion():
             raise http_error(404)
 
-        gl = FakeGitLab({"projects/1/merge_requests/7/discussions/stale-thread": missing_discussion})
+        gl = FakeGitLab(
+            {"projects/1/merge_requests/7/discussions/stale-thread": missing_discussion}
+        )
         gesture = {
             "kind": "mr",
             "mr_iid": "7",
@@ -288,7 +343,9 @@ class CommentResumeSemanticsTest(unittest.TestCase):
                     "mr_index": {"7": {"conversation_key": "20"}},
                     "pending_mr_comment_gestures": [],
                 }
-                gl = FakeGitLab({"projects/1/merge_requests/7": {"iid": 7, "state": state}})
+                gl = FakeGitLab(
+                    {"projects/1/merge_requests/7": {"iid": 7, "state": state}}
+                )
                 gesture = {
                     "kind": "mr",
                     "mr_iid": "7",
@@ -303,12 +360,19 @@ class CommentResumeSemanticsTest(unittest.TestCase):
                 self.assertEqual(len(existing["pending"]), 1)
                 self.assertIn("continue", existing["pending"][0])
                 self.assertNotIn("@agent", existing["pending"][0])
-                self.assertEqual(existing["next_reply_target"], {"kind": "mr", "mr_iid": "7", "note_id": 6})
+                self.assertEqual(
+                    existing["next_reply_target"],
+                    {"kind": "mr", "mr_iid": "7", "note_id": 6},
+                )
 
     def test_award_resume_path_is_unchanged(self):
         existing = conv()
         existing["last_note_id"] = 55
-        ps = {"conversations": {"20": existing}, "mr_index": {}, "pending_mr_comment_gestures": []}
+        ps = {
+            "conversations": {"20": existing},
+            "mr_index": {},
+            "pending_mr_comment_gestures": [],
+        }
 
         watcher.assemble(
             FakeGitLab({}),
@@ -323,7 +387,9 @@ class CommentResumeSemanticsTest(unittest.TestCase):
         )
 
         self.assertEqual(existing["pending"], [watcher.APPROVAL_MESSAGE])
-        self.assertEqual(existing["next_reply_target"], {"kind": "issue", "issue_iid": "20"})
+        self.assertEqual(
+            existing["next_reply_target"], {"kind": "issue", "issue_iid": "20"}
+        )
 
 
 if __name__ == "__main__":

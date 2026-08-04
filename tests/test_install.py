@@ -26,21 +26,21 @@ class InstallTest(unittest.TestCase):
         launchctl = self.bin / "launchctl"
         launchctl.write_text(
             "#!/bin/sh\n"
-            "echo \"$*\" >> \"$FAKE_LAUNCHCTL_CALLS\"\n"
-            "case \"$1\" in\n"
+            'echo "$*" >> "$FAKE_LAUNCHCTL_CALLS"\n'
+            'case "$1" in\n'
             "  bootout) exit 0 ;;\n"
             "  bootstrap)\n"
             "    count=0\n"
-            "    [ ! -f \"$FAKE_BOOTSTRAP_COUNT\" ] || count=$(cat \"$FAKE_BOOTSTRAP_COUNT\")\n"
+            '    [ ! -f "$FAKE_BOOTSTRAP_COUNT" ] || count=$(cat "$FAKE_BOOTSTRAP_COUNT")\n'
             "    count=$((count + 1))\n"
-            "    echo \"$count\" > \"$FAKE_BOOTSTRAP_COUNT\"\n"
-            "    if [ \"$count\" -le \"$FAKE_BOOTSTRAP_FAILURES\" ]; then\n"
+            '    echo "$count" > "$FAKE_BOOTSTRAP_COUNT"\n'
+            '    if [ "$count" -le "$FAKE_BOOTSTRAP_FAILURES" ]; then\n'
             "      echo 'Bootstrap failed: 5: Input/output error' >&2\n"
             "      exit 5\n"
             "    fi\n"
             "    exit 0\n"
             "    ;;\n"
-            "  load) [ \"$FAKE_LOAD_FAILURE\" != 1 ] ;;\n"
+            '  load) [ "$FAKE_LOAD_FAILURE" != 1 ] ;;\n'
             "  print) echo 'state = running'; echo 'pid = 123'; exit 0 ;;\n"
             "esac\n"
         )
@@ -51,12 +51,12 @@ class InstallTest(unittest.TestCase):
         mv = self.bin / "mv"
         mv.write_text(
             "#!/bin/sh\n"
-            "case \"$1\" in\n"
+            'case "$1" in\n'
             "  */.local/state/board-watcher)\n"
-            "    [ \"$FAKE_FAIL_STATE_MOVE\" != 1 ] || exit 9\n"
+            '    [ "$FAKE_FAIL_STATE_MOVE" != 1 ] || exit 9\n'
             "    ;;\n"
             "esac\n"
-            "exec /bin/mv \"$@\"\n"
+            'exec /bin/mv "$@"\n'
         )
         mv.chmod(0o755)
 
@@ -105,7 +105,9 @@ class InstallTest(unittest.TestCase):
         current_config = self.home / ".config" / "eastwatch"
         current_state = self.home / ".local" / "state" / "eastwatch"
         self.assertEqual((current_config / "config.yaml").read_text(), "projects: []\n")
-        self.assertEqual((current_state / "state.json").read_text(), '{"projects": {}}\n')
+        self.assertEqual(
+            (current_state / "state.json").read_text(), '{"projects": {}}\n'
+        )
         self.assertTrue(legacy_config.is_symlink())
         self.assertTrue(legacy_state.is_symlink())
         self.assertEqual(legacy_config.resolve(), current_config.resolve())
@@ -125,7 +127,9 @@ class InstallTest(unittest.TestCase):
         self.assertIn("refusing to merge divergent directories", result.stderr)
         self.assertEqual((legacy_config / "config.yaml").read_text(), "legacy\n")
         self.assertEqual((current_config / "config.yaml").read_text(), "current\n")
-        self.assertFalse(self.calls.exists(), "validation must happen before stopping jobs")
+        self.assertFalse(
+            self.calls.exists(), "validation must happen before stopping jobs"
+        )
 
     def test_accepts_relative_compatibility_symlinks(self):
         current_config = self.home / ".config" / "eastwatch"
@@ -164,7 +168,10 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(legacy_plist.exists())
         calls = self.calls.read_text().splitlines()
         self.assertTrue(
-            any(call.endswith(str(legacy_plist)) and call.startswith("bootstrap ") for call in calls),
+            any(
+                call.endswith(str(legacy_plist)) and call.startswith("bootstrap ")
+                for call in calls
+            ),
             calls,
         )
 
@@ -186,13 +193,18 @@ class InstallTest(unittest.TestCase):
         result = self.run_install(bootstrap_failures=0)
 
         self.assertEqual(result.returncode, 1)
-        self.assertIn("refusing to move state while worker runs are active", result.stderr)
+        self.assertIn(
+            "refusing to move state while worker runs are active", result.stderr
+        )
         self.assertTrue(legacy_config.is_dir())
         self.assertTrue(legacy_state.is_dir())
         self.assertTrue(legacy_plist.exists())
         calls = self.calls.read_text().splitlines()
         self.assertTrue(
-            any(call.endswith(str(legacy_plist)) and call.startswith("bootstrap ") for call in calls),
+            any(
+                call.endswith(str(legacy_plist)) and call.startswith("bootstrap ")
+                for call in calls
+            ),
             calls,
         )
 
@@ -219,7 +231,10 @@ class InstallTest(unittest.TestCase):
         self.assertFalse(new_plist.exists())
         calls = self.calls.read_text().splitlines()
         self.assertTrue(
-            any(call.endswith(str(legacy_plist)) and call.startswith("bootstrap ") for call in calls),
+            any(
+                call.endswith(str(legacy_plist)) and call.startswith("bootstrap ")
+                for call in calls
+            ),
             calls,
         )
 

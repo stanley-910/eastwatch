@@ -97,7 +97,9 @@ class DispatchTransitionTest(VaultPollerTestBase):
         # Touch without a content change -> no new generation, no fire.
         path = self.write("a.md", note("agent"))
         self.bootstrap()
-        path.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")  # rewrite, same bytes
+        path.write_text(
+            path.read_text(encoding="utf-8"), encoding="utf-8"
+        )  # rewrite, same bytes
 
         self.poll()
 
@@ -144,7 +146,9 @@ class BlockedTest(VaultPollerTestBase):
         self.poll()
         self.assertEqual(self.ps["vault_outbox"], {})
 
-        self.client.set_status(str(blocker), "done")  # blocker done; main stays at `agent`
+        self.client.set_status(
+            str(blocker), "done"
+        )  # blocker done; main stays at `agent`
         self.poll()
         fires = watcher.vault_dispatch_fires(self.ps)
         self.assertEqual(len(fires), 1)
@@ -188,7 +192,12 @@ class ConversationTest(VaultPollerTestBase):
     def test_make_conversation_sets_vault_fields_and_default_model(self):
         self.write("a.md", note("agent"))
         conv = watcher.make_conversation(
-            None, self.proj, self._issue(), "agent::ready", [], {"agent::ready": "claude:opus"}
+            None,
+            self.proj,
+            self._issue(),
+            "agent::ready",
+            [],
+            {"agent::ready": "claude:opus"},
         )
 
         self.assertEqual(conv["forge"], "vault")
@@ -201,7 +210,12 @@ class ConversationTest(VaultPollerTestBase):
     def test_note_model_hint_wins_over_default(self):
         self.write("a.md", note("agent", extra="model: pi:gpt-5\n"))
         conv = watcher.make_conversation(
-            None, self.proj, self._issue(), "agent::ready", [], {"agent::ready": "claude:opus"}
+            None,
+            self.proj,
+            self._issue(),
+            "agent::ready",
+            [],
+            {"agent::ready": "claude:opus"},
         )
         self.assertEqual(conv["provider"], "pi")
         self.assertEqual(conv["model"], "gpt-5")
@@ -211,7 +225,12 @@ class ConversationTest(VaultPollerTestBase):
         # current path hashes to) resumes the same claude session.
         self.write("renamed.md", note("agent", extra="session-id: sess-abc-123\n"))
         conv = watcher.make_conversation(
-            None, self.proj, self._issue(), "agent::ready", [], {"agent::ready": "claude:sonnet"}
+            None,
+            self.proj,
+            self._issue(),
+            "agent::ready",
+            [],
+            {"agent::ready": "claude:sonnet"},
         )
         self.assertEqual(conv["session_id"], "sess-abc-123")
 
@@ -219,17 +238,30 @@ class ConversationTest(VaultPollerTestBase):
 class WriteBackTest(VaultPollerTestBase):
     def _conv_for(self, path):
         items = self.client.fetch_items()
-        issue = next(watcher.vault_issue_from_item(i) for i in items if i["abs_path"] == str(path.resolve()))
+        issue = next(
+            watcher.vault_issue_from_item(i)
+            for i in items
+            if i["abs_path"] == str(path.resolve())
+        )
         return watcher.make_conversation(
-            None, self.proj, issue, "agent::ready", [], {"agent::ready": "claude:sonnet"}
+            None,
+            self.proj,
+            issue,
+            "agent::ready",
+            [],
+            {"agent::ready": "claude:sonnet"},
         )
 
     def test_parked_result_writes_needs_input_and_result_section(self):
         path = self.write("a.md", note("in-progress", extra="session-id: sess-1\n"))
         conv = self._conv_for(path)
 
-        watcher.post_conversation_note(None, self.proj, conv, "STATUS: parked\n\nNeed the owner.")
-        watcher.set_issue_agent_label(None, self.proj, conv["issue_iid"], watcher.PARKED_LABEL, conv)
+        watcher.post_conversation_note(
+            None, self.proj, conv, "STATUS: parked\n\nNeed the owner."
+        )
+        watcher.set_issue_agent_label(
+            None, self.proj, conv["issue_iid"], watcher.PARKED_LABEL, conv
+        )
 
         text = path.read_text(encoding="utf-8")
         self.assertEqual(self.client.read_status(str(path)), "needs-input")
@@ -242,7 +274,9 @@ class WriteBackTest(VaultPollerTestBase):
         conv = self._conv_for(path)
 
         watcher.post_conversation_note(None, self.proj, conv, "All done.")
-        watcher.set_issue_agent_label(None, self.proj, conv["issue_iid"], watcher.FOR_HUMAN_LABEL, conv)
+        watcher.set_issue_agent_label(
+            None, self.proj, conv["issue_iid"], watcher.FOR_HUMAN_LABEL, conv
+        )
 
         self.assertEqual(self.client.read_status(str(path)), "review")
         self.assertIn("## Result", path.read_text(encoding="utf-8"))

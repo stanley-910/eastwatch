@@ -52,7 +52,9 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
             json.dumps(
                 {
                     "type": "assistant",
-                    "message": {"content": [{"type": "text", "text": "Need retry ownership"}]},
+                    "message": {
+                        "content": [{"type": "text", "text": "Need retry ownership"}]
+                    },
                 }
             )
             + "\n"
@@ -69,10 +71,7 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
             + "\n"
         )
         self.status = self.root / "fleet-status"
-        self.status.write_text(
-            "#!/bin/sh\n"
-            f"/bin/cat {self.rows_path}\n"
-        )
+        self.status.write_text(f"#!/bin/sh\n/bin/cat {self.rows_path}\n")
         self.status.chmod(0o755)
         self.resume = self.root / "fleet-resume"
         self.resume.write_text("#!/bin/sh\nexit 0\n")
@@ -169,7 +168,9 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(table.row_count, 2)
             self.assertEqual(app._layout_mode, "compact")
             self.assertEqual(app.selected_identity, "parked")
-            self.assertIn("Need retry ownership", render_text(app.query_one("#trace", TraceView)))
+            self.assertIn(
+                "Need retry ownership", render_text(app.query_one("#trace", TraceView))
+            )
 
             await pilot.press("down")
             await pilot.pause(0.2)
@@ -456,7 +457,9 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
         completed = mock.Mock(returncode=0)
         with (
             mock.patch("eastwatch.fleet.tui.sys.platform", "darwin"),
-            mock.patch("eastwatch.fleet.tui.subprocess.run", return_value=completed) as run,
+            mock.patch(
+                "eastwatch.fleet.tui.subprocess.run", return_value=completed
+            ) as run,
         ):
             app.copy_to_clipboard("trace only")
         self.assertEqual(app._clipboard, "trace only")
@@ -574,7 +577,9 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
             }
             for index in range(40)
         ]
-        self.claude_log.write_text("\n".join(json.dumps(event) for event in events) + "\n")
+        self.claude_log.write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n"
+        )
 
         app = self.app()
         async with app.run_test(size=(100, 24)) as pilot:
@@ -600,9 +605,7 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
             {
                 "type": "assistant",
                 "message": {
-                    "content": [
-                        {"type": "text", "text": f"trace line {index}"}
-                    ]
+                    "content": [{"type": "text", "text": f"trace line {index}"}]
                 },
             }
             for index in range(80)
@@ -727,7 +730,9 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
             }
             for index in range(600)
         ]
-        self.claude_log.write_text("\n".join(json.dumps(event) for event in events) + "\n")
+        self.claude_log.write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n"
+        )
 
         app = self.app()
         async with app.run_test(size=(100, 24)) as pilot:
@@ -750,7 +755,9 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
             self.assertIs(app._trace_model, cached)
             self.assertEqual(len(app._trace_model.lines), 600)
 
-    async def test_finished_trace_retention_observes_grace_boundary_and_waits_for_delete(self):
+    async def test_finished_trace_retention_observes_grace_boundary_and_waits_for_delete(
+        self,
+    ):
         events = [
             {
                 "type": "assistant",
@@ -758,7 +765,9 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
             }
             for index in range(600)
         ]
-        self.claude_log.write_text("\n".join(json.dumps(event) for event in events) + "\n")
+        self.claude_log.write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n"
+        )
         now = 1_000_000.0
 
         app = self.app(clock=lambda: now)
@@ -812,7 +821,9 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
             }
             for index in range(80)
         ]
-        self.claude_log.write_text("\n".join(json.dumps(event) for event in events) + "\n")
+        self.claude_log.write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n"
+        )
 
         app = self.app()
         async with app.run_test(size=(100, 24)) as pilot:
@@ -897,7 +908,9 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("STOP ARMED", render_text(app.query_one("#notice", Static)))
 
             completed = mock.Mock(returncode=0, stderr="")
-            with mock.patch("eastwatch.fleet.tui.subprocess.run", return_value=completed) as run:
+            with mock.patch(
+                "eastwatch.fleet.tui.subprocess.run", return_value=completed
+            ) as run:
                 await pilot.press("s")
                 await pilot.pause(0.1)
             self.assertIsNone(app._armed_stop)
@@ -941,7 +954,9 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
 
             completed = mock.Mock(returncode=0, stderr="")
             with (
-                mock.patch("eastwatch.fleet.tui.subprocess.run", return_value=completed) as chat,
+                mock.patch(
+                    "eastwatch.fleet.tui.subprocess.run", return_value=completed
+                ) as chat,
                 mock.patch.dict(os.environ, {"TMUX": "/tmp/tmux"}),
             ):
                 await pilot.press("i")
@@ -951,16 +966,16 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
                 [str(self.resume), "finished"],
             )
 
-            with mock.patch("eastwatch.fleet.tui.subprocess.run", return_value=completed) as run:
+            with mock.patch(
+                "eastwatch.fleet.tui.subprocess.run", return_value=completed
+            ) as run:
                 await pilot.press("x")
                 await pilot.pause(0.1)
             self.assertEqual(
                 run.call_args.args[0],
                 [str(self.dismiss), "finished", "run-80"],
             )
-            self.assertFalse(
-                any(key[0] == "finished" for key in app._trace_cache)
-            )
+            self.assertFalse(any(key[0] == "finished" for key in app._trace_cache))
 
     async def test_invalid_action_explains_why(self):
         app = self.app()

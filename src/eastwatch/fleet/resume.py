@@ -44,7 +44,8 @@ def load_rows(fleet_status: Command = FLEET_STATUS) -> tuple[FleetRow, ...]:
     if result.returncode:
         detail = result.stderr.strip()
         raise RuntimeError(
-            f"fleet-status exited {result.returncode}" + (f": {detail}" if detail else "")
+            f"fleet-status exited {result.returncode}"
+            + (f": {detail}" if detail else "")
         )
     try:
         return parse_rows(json.loads(result.stdout))
@@ -203,8 +204,12 @@ def build_parser() -> argparse.ArgumentParser:
         prog="fleet-resume",
         description="Open an interactive chat on a resumable fleet conversation.",
     )
-    parser.add_argument("-p", "--pane", action="store_true", help="split current tmux window")
-    parser.add_argument("-n", "--dry-run", action="store_true", help="print command only")
+    parser.add_argument(
+        "-p", "--pane", action="store_true", help="split current tmux window"
+    )
+    parser.add_argument(
+        "-n", "--dry-run", action="store_true", help="print command only"
+    )
     parser.add_argument("query", nargs="?", help="key, identity, or URL fragment")
     parser.add_argument("--hold-lock", help=argparse.SUPPRESS)
     return parser
@@ -223,7 +228,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         candidates = resumable_rows(load_rows())
         if not candidates:
             raise LookupError("no resumable sessions")
-        selected = match_row(candidates, args.query) if args.query else choose_row(candidates)
+        selected = (
+            match_row(candidates, args.query) if args.query else choose_row(candidates)
+        )
         command = interactive_command(selected)
     except KeyboardInterrupt:
         return 130
@@ -239,13 +246,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if not selected.cwd or not Path(selected.cwd).is_dir():
-        print(f"fleet-resume: repository cwd is unavailable: {selected.cwd or '(empty)'}", file=sys.stderr)
+        print(
+            f"fleet-resume: repository cwd is unavailable: {selected.cwd or '(empty)'}",
+            file=sys.stderr,
+        )
         return 1
     if chat_lock_active(selected):
-        print(f"fleet-resume: interactive chat already active for {selected.key}", file=sys.stderr)
+        print(
+            f"fleet-resume: interactive chat already active for {selected.key}",
+            file=sys.stderr,
+        )
         return 1
     if tmux_window_exists(chat_name(selected)):
-        print(f"fleet-resume: chat window already active for {selected.key}", file=sys.stderr)
+        print(
+            f"fleet-resume: chat window already active for {selected.key}",
+            file=sys.stderr,
+        )
         return 1
 
     print(
@@ -254,9 +270,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         file=sys.stderr,
     )
     if os.environ.get("TMUX"):
-        runner = entrypoint_command(
-            "eastwatch.fleet.resume", "fleet-resume"
-        ) + ("--hold-lock", row_payload(selected))
+        runner = entrypoint_command("eastwatch.fleet.resume", "fleet-resume") + (
+            "--hold-lock",
+            row_payload(selected),
+        )
         result = subprocess.run(
             tmux_chat_command(selected, pane=args.pane, runner=runner),
             check=False,

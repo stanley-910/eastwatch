@@ -60,11 +60,15 @@ class JiraParserTest(unittest.TestCase):
                         )
 
     def test_custom_field_flag_extends_fetch_and_rendering(self):
-        result = jira_core.HttpResult(True, 200, "https://jira.example.com", "application/json", "", None)
+        result = jira_core.HttpResult(
+            True, 200, "https://jira.example.com", "application/json", "", None
+        )
         issue = {"key": "PROJ-123", "fields": {"customfield_42": 5}}
         output = io.StringIO()
         with (
-            mock.patch.object(jira_core, "fetch_issue", return_value=(result, issue)) as fetch,
+            mock.patch.object(
+                jira_core, "fetch_issue", return_value=(result, issue)
+            ) as fetch,
             mock.patch.object(jira_core, "auth_headers", return_value=({}, "test")),
             contextlib.redirect_stdout(output),
         ):
@@ -106,7 +110,9 @@ class JiraParserTest(unittest.TestCase):
                         )
 
     def test_development_field_flag_extends_fetch_and_rendering(self):
-        result = jira_core.HttpResult(True, 200, "https://jira.example.com", "application/json", "", None)
+        result = jira_core.HttpResult(
+            True, 200, "https://jira.example.com", "application/json", "", None
+        )
         issue = {
             "key": "PROJ-123",
             "fields": {
@@ -116,7 +122,9 @@ class JiraParserTest(unittest.TestCase):
         }
         output = io.StringIO()
         with (
-            mock.patch.object(jira_core, "fetch_issue", return_value=(result, issue)) as fetch,
+            mock.patch.object(
+                jira_core, "fetch_issue", return_value=(result, issue)
+            ) as fetch,
             mock.patch.object(jira_core, "auth_headers", return_value=({}, "test")),
             contextlib.redirect_stdout(output),
         ):
@@ -157,7 +165,9 @@ class JiraAuthTest(unittest.TestCase):
         self.assertEqual(jira_core.bearer_header("Basic abc123"), "Basic abc123")
 
     def test_env_auth_header_takes_precedence(self):
-        with mock.patch.dict(os.environ, {"JIRA_AUTH_HEADER": "Bearer env-token"}, clear=True):
+        with mock.patch.dict(
+            os.environ, {"JIRA_AUTH_HEADER": "Bearer env-token"}, clear=True
+        ):
             with mock.patch.object(jira_core, "keychain_token") as keychain:
                 headers, source = jira_core.auth_headers(
                     self.args(keychain_service="svc", keychain_account="acct")
@@ -168,9 +178,14 @@ class JiraAuthTest(unittest.TestCase):
 
     def test_keychain_pat_becomes_bearer_header(self):
         with mock.patch.dict(os.environ, {}, clear=True):
-            with mock.patch.object(jira_core, "keychain_token", return_value="pat-token"):
+            with mock.patch.object(
+                jira_core, "keychain_token", return_value="pat-token"
+            ):
                 headers, source = jira_core.auth_headers(
-                    self.args(keychain_service="eastwatch-jira-pat", keychain_account="test-user")
+                    self.args(
+                        keychain_service="eastwatch-jira-pat",
+                        keychain_account="test-user",
+                    )
                 )
         self.assertEqual(headers["Authorization"], "Bearer pat-token")
         self.assertEqual(source, "keychain:eastwatch-jira-pat/test-user")
@@ -201,7 +216,9 @@ class JiraAuthTest(unittest.TestCase):
         )
 
     def test_basic_auth_fallback(self):
-        with mock.patch.dict(os.environ, {"JIRA_USER": "me", "JIRA_TOKEN": "tok"}, clear=True):
+        with mock.patch.dict(
+            os.environ, {"JIRA_USER": "me", "JIRA_TOKEN": "tok"}, clear=True
+        ):
             headers, source = jira_core.auth_headers(self.args())
         self.assertEqual(headers["Authorization"], "Basic bWU6dG9r")
         self.assertEqual(source, "JIRA_USER/JIRA_TOKEN")
@@ -223,7 +240,9 @@ class JiraSectionTest(unittest.TestCase):
 
     def test_sections_can_be_repeated_or_comma_separated(self):
         args = self.args(section=["status,comments", "attachments"])
-        self.assertEqual(jira_core.selected_sections(args), ["status", "comments", "attachments"])
+        self.assertEqual(
+            jira_core.selected_sections(args), ["status", "comments", "attachments"]
+        )
 
     def test_all_expands_to_every_renderable_section(self):
         sections = jira_core.selected_sections(self.args(section=["all"]))
@@ -264,7 +283,9 @@ class JiraSectionTest(unittest.TestCase):
             jira_core.render_attachments(issue)
         self.assertIn("diagram.png", out.getvalue())
         self.assertIn("image/png", out.getvalue())
-        self.assertIn("https://jira.example.com/secure/attachment/1/diagram.png", out.getvalue())
+        self.assertIn(
+            "https://jira.example.com/secure/attachment/1/diagram.png", out.getvalue()
+        )
 
     def test_development_summary_parses_jira_devstatus_json(self):
         raw = 'prefix devSummaryJson={"cachedValue":{"summary":{"pullrequest":{"overall":{"count":1,"details":{"mergedCount":10}},"byInstanceType":{"gitlabselfmanaged":{"count":1,"name":"GitLab Self-Managed"}}}}},"isStale":false}'
@@ -286,7 +307,9 @@ class JiraSectionTest(unittest.TestCase):
         self.assertEqual(jira_core.linked_issue_keys(issue), ["PROJ-1", "PROJ-2"])
 
     def test_safe_attachment_filename_removes_paths(self):
-        self.assertEqual(jira_core.safe_attachment_filename("../bad/name?.png"), "name_.png")
+        self.assertEqual(
+            jira_core.safe_attachment_filename("../bad/name?.png"), "name_.png"
+        )
 
 
 class JiraFetchTest(unittest.TestCase):
@@ -311,12 +334,14 @@ class JiraFetchTest(unittest.TestCase):
 
     def test_fetch_issue_reads_full_json_response(self):
         payload = (
-            '{"key":"PROJ-8095","fields":{"summary":"'
-            + ("x" * 8000)
-            + '"}}'
+            '{"key":"PROJ-8095","fields":{"summary":"' + ("x" * 8000) + '"}}'
         ).encode()
-        with mock.patch.object(jira_core.urllib.request, "urlopen", return_value=self.Response(payload)):
-            result, issue = jira_core.fetch_issue("https://jira.example.com", "PROJ-8095", "summary", {})
+        with mock.patch.object(
+            jira_core.urllib.request, "urlopen", return_value=self.Response(payload)
+        ):
+            result, issue = jira_core.fetch_issue(
+                "https://jira.example.com", "PROJ-8095", "summary", {}
+            )
         self.assertTrue(result.ok)
         self.assertEqual(result.status, 200)
         self.assertEqual(len(issue["fields"]["summary"]), 8000)
@@ -333,7 +358,10 @@ class JiraFetchTest(unittest.TestCase):
                 }
             }
         }
-        self.assertEqual([item["body"] for item in jira_core.comments(issue, limit=2)], ["newer", "newest"])
+        self.assertEqual(
+            [item["body"] for item in jira_core.comments(issue, limit=2)],
+            ["newer", "newest"],
+        )
 
     def test_download_attachment_writes_content_with_auth_headers(self):
         attachment = {
@@ -342,14 +370,18 @@ class JiraFetchTest(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as tmp:
             response = self.Response(b"png-bytes")
-            with mock.patch.object(jira_core.urllib.request, "urlopen", return_value=response) as urlopen:
+            with mock.patch.object(
+                jira_core.urllib.request, "urlopen", return_value=response
+            ) as urlopen:
                 path = jira_core.download_attachment(
                     attachment,
                     Path(tmp),
                     {"Authorization": "Bearer token"},
                 )
             self.assertEqual(path.name, "image.png")
-            self.assertEqual(urlopen.call_args.args[0].headers["Authorization"], "Bearer token")
+            self.assertEqual(
+                urlopen.call_args.args[0].headers["Authorization"], "Bearer token"
+            )
             self.assertEqual(path.read_bytes(), b"png-bytes")
 
 

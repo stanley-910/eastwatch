@@ -65,7 +65,9 @@ class PackageCompatibilityTest(unittest.TestCase):
         self.assertEqual(legacy.repository_root(), current.repository_root())
 
     def test_legacy_console_script_targets_eastwatch(self):
-        project = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text())["project"]
+        project = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text())[
+            "project"
+        ]
 
         self.assertEqual(project["scripts"]["eastwatch"], "eastwatch.watcher:cli")
         self.assertEqual(project["scripts"]["board-watcher"], "eastwatch.watcher:cli")

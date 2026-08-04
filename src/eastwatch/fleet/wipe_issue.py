@@ -59,7 +59,9 @@ def matching_projects(projects: dict, slug: str) -> list[str]:
     ]
 
 
-def remove_issue_memory(state: dict, project_key: str, issue: str) -> tuple[dict | None, int]:
+def remove_issue_memory(
+    state: dict, project_key: str, issue: str
+) -> tuple[dict | None, int]:
     project = state.get("projects", {}).get(project_key)
     if not isinstance(project, dict):
         return None, 0
@@ -69,7 +71,10 @@ def remove_issue_memory(state: dict, project_key: str, issue: str) -> tuple[dict
     for mr_iid, mapping in list(mr_index.items()):
         if not isinstance(mapping, dict):
             continue
-        if str(mapping.get("issue_iid")) == issue or str(mapping.get("conversation_key")) == issue:
+        if (
+            str(mapping.get("issue_iid")) == issue
+            or str(mapping.get("conversation_key")) == issue
+        ):
             del mr_index[mr_iid]
             removed_mappings += 1
     return conversation, removed_mappings
@@ -110,7 +115,9 @@ def kill_retained_tmux(conversation: dict | None) -> None:
         )
 
 
-def wipe_issue(root: Path, slug: str, issue: str) -> tuple[str, dict | None, int, Path] | None:
+def wipe_issue(
+    root: Path, slug: str, issue: str
+) -> tuple[str, dict | None, int, Path] | None:
     state_path = root / "state.json"
     backup_path = root / "state.json.bak"
     lock_path = root / "cycle.lock"
@@ -138,25 +145,34 @@ def wipe_issue(root: Path, slug: str, issue: str) -> tuple[str, dict | None, int
 
         project = state["projects"][project_key]
         current_conversation = (project.get("conversations") or {}).get(issue)
-        if isinstance(current_conversation, dict) and current_conversation.get("current_run"):
+        if isinstance(current_conversation, dict) and current_conversation.get(
+            "current_run"
+        ):
             raise WipeError("issue has an active run; stop it in Fleet before wiping")
 
         backup = load_json(backup_path, required=False)
         backup_project = (backup or {}).get("projects", {}).get(project_key, {})
         backup_conversation = (backup_project.get("conversations") or {}).get(issue)
         artifact_conversation = current_conversation or backup_conversation
-        default_artifact_dir = root / "convos" / f"{project_path(project_key).replace('/', '-')}-{issue}"
+        default_artifact_dir = (
+            root / "convos" / f"{project_path(project_key).replace('/', '-')}-{issue}"
+        )
         configured_artifact_dir = (
             Path(artifact_conversation["session_dir"])
-            if isinstance(artifact_conversation, dict) and artifact_conversation.get("session_dir")
+            if isinstance(artifact_conversation, dict)
+            and artifact_conversation.get("session_dir")
             else default_artifact_dir
         )
         artifact_dir = checked_artifact_dir(root, configured_artifact_dir)
 
-        removed_conversation, removed_mappings = remove_issue_memory(state, project_key, issue)
+        removed_conversation, removed_mappings = remove_issue_memory(
+            state, project_key, issue
+        )
         removed_backup_conversation = None
         if backup is not None:
-            removed_backup_conversation, _ = remove_issue_memory(backup, project_key, issue)
+            removed_backup_conversation, _ = remove_issue_memory(
+                backup, project_key, issue
+            )
 
         if (
             removed_conversation is None
@@ -197,7 +213,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     slug, issue = args
     if not issue.isdigit() or int(issue) < 1:
-        print("fleet-wipe-issue: issue number must be a positive integer", file=sys.stderr)
+        print(
+            "fleet-wipe-issue: issue number must be a positive integer", file=sys.stderr
+        )
         return 2
 
     confirmation = f"{slug}#{issue}"
@@ -217,7 +235,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("fleet-wipe-issue: cancelled", file=sys.stderr)
             return 1
 
-    root = Path(getenv("EASTWATCH_STATE_DIR") or "~/.local/state/eastwatch").expanduser()
+    root = Path(
+        getenv("EASTWATCH_STATE_DIR") or "~/.local/state/eastwatch"
+    ).expanduser()
     try:
         result = wipe_issue(root, slug, issue)
     except WipeError as exc:

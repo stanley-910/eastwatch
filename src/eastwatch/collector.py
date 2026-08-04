@@ -48,7 +48,10 @@ class RunJournal:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps(payload, separators=(",", ":"), ensure_ascii=False) + "\n")
+                stream.write(
+                    json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+                    + "\n"
+                )
         except OSError:
             # Journaling is diagnostic. It must never take down the worker.
             return
@@ -109,7 +112,10 @@ class _RawCapture:
         destination = self.path.with_suffix(self.path.suffix + ".gz")
         temporary = destination.with_suffix(destination.suffix + ".tmp")
         try:
-            with self.path.open("rb") as source, gzip.open(temporary, "wb") as compressed:
+            with (
+                self.path.open("rb") as source,
+                gzip.open(temporary, "wb") as compressed,
+            ):
                 shutil.copyfileobj(source, compressed, length=1024 * 1024)
             os.replace(temporary, destination)
             self.path.unlink()
@@ -310,7 +316,10 @@ class PiStreamCollector(StreamCollector):
     def assistant_outcome(message: object) -> str | None:
         if not isinstance(message, dict) or message.get("role") != "assistant":
             return None
-        if message.get("errorMessage") or message.get("stopReason") in {"error", "aborted"}:
+        if message.get("errorMessage") or message.get("stopReason") in {
+            "error",
+            "aborted",
+        }:
             return "failure"
         if message.get("stopReason") == "stop":
             return "success"
@@ -384,7 +393,9 @@ class PiStreamCollector(StreamCollector):
 
     def consume_event(self, event: dict) -> None:
         event_type = event.get("type")
-        if (self.terminal_agent_end or self.deadline is not None) and event_type in self._ACTIVITY_EVENTS:
+        if (
+            self.terminal_agent_end or self.deadline is not None
+        ) and event_type in self._ACTIVITY_EVENTS:
             self.cancel_guard()
         elif event_type in {"agent_start", "turn_start", "message_start"}:
             self.outcome = None
@@ -419,7 +430,9 @@ class PiStreamCollector(StreamCollector):
             self.attempt_tool_started = True
             if not self.tool_started:
                 self.tool_started = True
-                self.journal.emit("tool_first_started", tool=str(event.get("toolName") or ""))
+                self.journal.emit(
+                    "tool_first_started", tool=str(event.get("toolName") or "")
+                )
             return
 
         if event_type == "agent_end":
@@ -439,7 +452,11 @@ class PiStreamCollector(StreamCollector):
             self.journal.emit("agent_settled")
             if self.terminal_agent_end:
                 self.deadline = time.time() + self.grace_seconds
-                self.journal.emit("guard_armed", grace_seconds=self.grace_seconds, outcome=self.outcome)
+                self.journal.emit(
+                    "guard_armed",
+                    grace_seconds=self.grace_seconds,
+                    outcome=self.outcome,
+                )
 
     @property
     def reply(self) -> str:
@@ -449,11 +466,12 @@ class PiStreamCollector(StreamCollector):
         last_body = self._body(reply)
         if len(last_body) <= PI_THIN_TAIL_CHARS and self.assistant_text_count > 1:
             best_body = self._body(self.best_earlier)
-            if (
-                len(best_body) > PI_THIN_TAIL_CHARS
-                and len(best_body) >= PI_FRAGMENT_RATIO * max(len(last_body), 1)
-            ):
-                status = self._status_line(self.best_earlier) or self._status_line(reply)
+            if len(best_body) > PI_THIN_TAIL_CHARS and len(
+                best_body
+            ) >= PI_FRAGMENT_RATIO * max(len(last_body), 1):
+                status = self._status_line(self.best_earlier) or self._status_line(
+                    reply
+                )
                 reply = f"{best_body}\n\n{status}" if status else best_body
         return reply.strip()
 
@@ -462,7 +480,9 @@ class PiStreamCollector(StreamCollector):
         if not self._reply_journaled:
             self.journal.emit(
                 "reply_extracted",
-                source="message_end" if self.assistant_text_count else "text_delta_tail",
+                source="message_end"
+                if self.assistant_text_count
+                else "text_delta_tail",
                 delta_truncated=self.delta_tail.truncated,
                 chars=len(reply),
             )

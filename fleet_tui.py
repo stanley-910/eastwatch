@@ -15,7 +15,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
-if "EASTWATCH_REPO_ROOT" not in os.environ and "BOARD_WATCHER_REPO_ROOT" not in os.environ:
+if (
+    "EASTWATCH_REPO_ROOT" not in os.environ
+    and "BOARD_WATCHER_REPO_ROOT" not in os.environ
+):
     os.environ["EASTWATCH_REPO_ROOT"] = str(ROOT)
 sys.path.insert(0, str(SRC))
 

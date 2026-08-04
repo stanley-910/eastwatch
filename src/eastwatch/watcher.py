@@ -545,7 +545,10 @@ class GitHubProject:
     def hydrate_issue(self, number: int) -> dict:
         """Issue title/url/body for the launch prompt — one query, on dispatch only."""
         data = self.graphql(
-            GITHUB_ISSUE_HYDRATE_QUERY, owner=self.owner, name=self.name, number=int(number)
+            GITHUB_ISSUE_HYDRATE_QUERY,
+            owner=self.owner,
+            name=self.name,
+            number=int(number),
         )
         issue = ((data.get("repository") or {}).get("issue")) or {}
         return {
@@ -561,16 +564,23 @@ class GitHubProject:
         the issue exists but is not yet a member of the project.
         """
         data = self.graphql(
-            GITHUB_ISSUE_ITEM_QUERY, owner=self.owner, name=self.name, number=int(number)
+            GITHUB_ISSUE_ITEM_QUERY,
+            owner=self.owner,
+            name=self.name,
+            number=int(number),
         )
         issue = ((data.get("repository") or {}).get("issue")) or {}
         content_id = issue.get("id")
         item_id = None
-        for node in ((issue.get("projectItems") or {}).get("nodes") or []):
+        for node in (issue.get("projectItems") or {}).get("nodes") or []:
             if (node.get("project") or {}).get("id") == self.project_id:
                 item_id = node.get("id")
                 break
-        return {"item_id": item_id, "content_id": content_id, "state": issue.get("state")}
+        return {
+            "item_id": item_id,
+            "content_id": content_id,
+            "state": issue.get("state"),
+        }
 
     def item_status_name(self, item_id: str) -> str | None:
         """Single item's current Status name (pre-write recheck / read-back).
@@ -620,8 +630,9 @@ class GitHubProject:
             option=option_id,
         )
 
-    def set_status_fenced(self, item_id: str, status_name: str, *, attempts: int = 3,
-                          delay: float = 1.0) -> bool:
+    def set_status_fenced(
+        self, item_id: str, status_name: str, *, attempts: int = 3, delay: float = 1.0
+    ) -> bool:
         """Write Status and confirm it by read-back, re-applying if a workflow reverts it.
 
         Fences the Item-added->Triage project workflow (and any lost race): after
@@ -700,8 +711,14 @@ def save_state(state: dict) -> None:
         try:
             existing_projects = on_disk_project_count()
         except (json.JSONDecodeError, OSError) as e:
-            log.error("refusing to overwrite unreadable state file %s with zero-project state: %s", STATE_PATH, e)
-            raise StatePersistenceError("refusing to overwrite unreadable state with zero-project state") from e
+            log.error(
+                "refusing to overwrite unreadable state file %s with zero-project state: %s",
+                STATE_PATH,
+                e,
+            )
+            raise StatePersistenceError(
+                "refusing to overwrite unreadable state with zero-project state"
+            ) from e
         if existing_projects > 0:
             log.error(
                 "refusing to overwrite state file %s containing %d project(s) with zero-project state; "
@@ -710,7 +727,9 @@ def save_state(state: dict) -> None:
                 existing_projects,
                 STATE_BAK_PATH,
             )
-            raise StatePersistenceError("refusing to overwrite state containing projects with zero-project state")
+            raise StatePersistenceError(
+                "refusing to overwrite state containing projects with zero-project state"
+            )
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     tmp = STATE_PATH.with_name(f".{STATE_PATH.name}.{os.getpid()}.tmp")
@@ -794,7 +813,7 @@ def agent_mention_question(body: str) -> str | None:
     stripped = (body or "").strip()
     if not stripped.lower().startswith("@agent"):
         return None
-    return stripped[len("@agent"):].strip() or "(no question text)"
+    return stripped[len("@agent") :].strip() or "(no question text)"
 
 
 def note_reply_fields(target: dict, gesture: dict | None) -> dict:
@@ -820,7 +839,9 @@ def discussion_path(proj: dict, surface: str, iid: str | int) -> str:
     return f"projects/{proj['id']}/{resource}/{iid}/discussions"
 
 
-def discussion_detail_path(proj: dict, surface: str, iid: str | int, discussion_id: str | int) -> str:
+def discussion_detail_path(
+    proj: dict, surface: str, iid: str | int, discussion_id: str | int
+) -> str:
     return f"{discussion_path(proj, surface, iid)}/{discussion_id}"
 
 
@@ -854,20 +875,28 @@ def discussion_by_id(
     except requests.HTTPError as e:
         status_code = e.response.status_code if e.response is not None else None
         if status_code == 404:
-            log.warning("%s !%s: discussion %s lookup returned 404", surface, iid, discussion_id)
+            log.warning(
+                "%s !%s: discussion %s lookup returned 404", surface, iid, discussion_id
+            )
             return None
-        log.warning("%s !%s: could not fetch discussion %s: %s", surface, iid, discussion_id, e)
+        log.warning(
+            "%s !%s: could not fetch discussion %s: %s", surface, iid, discussion_id, e
+        )
         raise TransientDiscussionLookupError(
             f"{surface} !{iid} discussion {discussion_id} lookup failed: {e}"
         ) from e
     except requests.RequestException as e:
-        log.warning("%s !%s: could not fetch discussion %s: %s", surface, iid, discussion_id, e)
+        log.warning(
+            "%s !%s: could not fetch discussion %s: %s", surface, iid, discussion_id, e
+        )
         raise TransientDiscussionLookupError(
             f"{surface} !{iid} discussion {discussion_id} lookup failed: {e}"
         ) from e
 
 
-def discussion_has_bot_note(gl: GitLab, proj: dict, surface: str, iid: str | int, discussion_id: str | None) -> bool:
+def discussion_has_bot_note(
+    gl: GitLab, proj: dict, surface: str, iid: str | int, discussion_id: str | None
+) -> bool:
     bot_user_id = proj.get("bot_user_id")
     if bot_user_id is None:
         return False
@@ -903,7 +932,10 @@ def find_note_discussion_id(
         for page in range(1, DISCUSSION_LIST_PAGE_CAP + 1):
             discussions = gl.get(path, per_page=DISCUSSION_LIST_PER_PAGE, page=page)
             for discussion in discussions:
-                note_matches = note_id and any(str(note.get("id")) == note_id for note in discussion.get("notes") or [])
+                note_matches = note_id and any(
+                    str(note.get("id")) == note_id
+                    for note in discussion.get("notes") or []
+                )
                 if not note_matches:
                     continue
                 if discussion.get("individual_note") is True:
@@ -922,24 +954,47 @@ def find_note_discussion_id(
     except requests.HTTPError as e:
         status_code = e.response.status_code if e.response is not None else None
         if status_code == 404:
-            log.warning("%s !%s: discussions lookup for note %s returned 404", surface, iid, note_id)
+            log.warning(
+                "%s !%s: discussions lookup for note %s returned 404",
+                surface,
+                iid,
+                note_id,
+            )
             return None
-        log.warning("%s !%s: could not fetch discussions for note %s: %s", surface, iid, note_id, e)
+        log.warning(
+            "%s !%s: could not fetch discussions for note %s: %s",
+            surface,
+            iid,
+            note_id,
+            e,
+        )
         raise TransientDiscussionLookupError(
             f"{surface} !{iid} discussions lookup for note {note_id} failed: {e}"
         ) from e
     except requests.RequestException as e:
-        log.warning("%s !%s: could not fetch discussions for note %s: %s", surface, iid, note_id, e)
+        log.warning(
+            "%s !%s: could not fetch discussions for note %s: %s",
+            surface,
+            iid,
+            note_id,
+            e,
+        )
         raise TransientDiscussionLookupError(
             f"{surface} !{iid} discussions lookup for note {note_id} failed: {e}"
         ) from e
 
 
-def note_discussion_id(gl: GitLab, proj: dict, surface: str, iid: str | int, note: dict) -> str | None:
-    return find_note_discussion_id(gl, proj, surface, iid, note.get("id"), note.get("discussion_id"))
+def note_discussion_id(
+    gl: GitLab, proj: dict, surface: str, iid: str | int, note: dict
+) -> str | None:
+    return find_note_discussion_id(
+        gl, proj, surface, iid, note.get("id"), note.get("discussion_id")
+    )
 
 
-def capture_note_discussion_id(gl: GitLab, proj: dict, surface: str, iid: str | int, note: dict) -> str | None:
+def capture_note_discussion_id(
+    gl: GitLab, proj: dict, surface: str, iid: str | int, note: dict
+) -> str | None:
     try:
         return note_discussion_id(gl, proj, surface, iid, note)
     except TransientDiscussionLookupError as e:
@@ -978,7 +1033,9 @@ def mr_comment_context(mr: dict, gesture: dict, question: str | None = None) -> 
 def poll_comments(gl: GitLab, proj: dict, ps: dict, owner: str) -> list[dict]:
     """Events API comment stream -> owner issue/MR comment gestures, cursor advanced."""
     events = gl.get(f"projects/{proj['id']}/events", action="commented", per_page=100)
-    fresh = sorted((e for e in events if e["id"] > ps["last_event_id"]), key=lambda e: e["id"])
+    fresh = sorted(
+        (e for e in events if e["id"] > ps["last_event_id"]), key=lambda e: e["id"]
+    )
     if not ps["bootstrapped"]:
         if events:
             ps["last_event_id"] = max(e["id"] for e in events)
@@ -993,7 +1050,10 @@ def poll_comments(gl: GitLab, proj: dict, ps: dict, owner: str) -> list[dict]:
         ps["last_event_id"] = max(ps["last_event_id"], e["id"])
         note = e.get("note") or {}
         author = e.get("author") or {}
-        if author.get("id") == proj["bot_user_id"] or author.get("username") == proj["bot_username"]:
+        if (
+            author.get("id") == proj["bot_user_id"]
+            or author.get("username") == proj["bot_username"]
+        ):
             continue  # our own bot comments
         if note.get("system"):
             continue
@@ -1007,13 +1067,17 @@ def poll_comments(gl: GitLab, proj: dict, ps: dict, owner: str) -> list[dict]:
                     "kind": "issue",
                     "iid": iid,
                     "body": note.get("body") or "",
-                    "discussion_id": capture_note_discussion_id(gl, proj, "issue", iid, note),
+                    "discussion_id": capture_note_discussion_id(
+                        gl, proj, "issue", iid, note
+                    ),
                     "note_id": note.get("id"),
                     "event_id": e["id"],
                     "issue_state": noteable_state_from_event(e, note),
                 }
             )
-            log.info("comment gesture: issue !%s note %s by %s", iid, note.get("id"), owner)
+            log.info(
+                "comment gesture: issue !%s note %s by %s", iid, note.get("id"), owner
+            )
         elif noteable_type == "MergeRequest":
             mr_iid = str(note["noteable_iid"])
             gestures.append(
@@ -1023,29 +1087,40 @@ def poll_comments(gl: GitLab, proj: dict, ps: dict, owner: str) -> list[dict]:
                     "body": mr_resume_body(mr_iid, note),
                     "comment_body": note.get("body") or "",
                     "position": note.get("position"),
-                    "discussion_id": capture_note_discussion_id(gl, proj, "mr", mr_iid, note),
+                    "discussion_id": capture_note_discussion_id(
+                        gl, proj, "mr", mr_iid, note
+                    ),
                     "note_id": note.get("id"),
                     "event_id": e["id"],
                     "mr_state": noteable_state_from_event(e, note),
                 }
             )
-            log.info("comment gesture: merge request !%s note %s by %s", mr_iid, note.get("id"), owner)
+            log.info(
+                "comment gesture: merge request !%s note %s by %s",
+                mr_iid,
+                note.get("id"),
+                owner,
+            )
     return gestures
 
 
 def poll_label(gl: GitLab, proj: dict, ps: dict, label: str) -> list[dict]:
     """Label-filtered issue list + per-issue resource_label_events watermark."""
-    issues = gl.get(f"projects/{proj['id']}/issues", labels=label, state="opened", per_page=100)
+    issues = gl.get(
+        f"projects/{proj['id']}/issues", labels=label, state="opened", per_page=100
+    )
     consumed = set(ps["consumed_label_event_ids"])
     fired = []
     for iss in issues:
         evs = gl.get(
-            f"projects/{proj['id']}/issues/{iss['iid']}/resource_label_events", per_page=100
+            f"projects/{proj['id']}/issues/{iss['iid']}/resource_label_events",
+            per_page=100,
         )
         adds = [
             ev
             for ev in evs
-            if ev.get("action") == "add" and (ev.get("label") or {}).get("name") == label
+            if ev.get("action") == "add"
+            and (ev.get("label") or {}).get("name") == label
         ]
         if not adds:
             continue
@@ -1062,7 +1137,12 @@ def poll_label(gl: GitLab, proj: dict, ps: dict, label: str) -> list[dict]:
                 newest["id"],
             )
             continue
-        log.info("label gesture: `%s` on issue !%s (label event %s)", label, iss["iid"], newest["id"])
+        log.info(
+            "label gesture: `%s` on issue !%s (label event %s)",
+            label,
+            iss["iid"],
+            newest["id"],
+        )
         fired.append({"issue": iss, "label": label})
     ps["consumed_label_event_ids"] = sorted(consumed)[-1000:]
     return fired
@@ -1082,7 +1162,9 @@ def poll_awards(gl: GitLab, proj: dict, ps: dict) -> set[tuple[str, str, str]]:
                     if not m:
                         continue
                     for a in (n.get("awardEmoji") or {"nodes": []})["nodes"]:
-                        keys.add((f"note:{m.group(1)}", a["name"], a["user"]["username"]))
+                        keys.add(
+                            (f"note:{m.group(1)}", a["name"], a["user"]["username"])
+                        )
     prev = {tuple(k) for k in ps["award_keys"]}
     ps["award_keys"] = sorted(list(k) for k in keys)
     if not ps["bootstrapped"]:
@@ -1167,7 +1249,9 @@ def poll_github_status(
             observations[item_id] = record
             log.info(
                 "github: adopted first-seen item %s (issue #%s) at Status %s — not dispatched",
-                item_id, item.get("number"), item.get("status_name"),
+                item_id,
+                item.get("number"),
+                item.get("status_name"),
             )
             continue
         if prev.get("generation") == generation:
@@ -1190,17 +1274,28 @@ def poll_github_status(
             }
             log.info(
                 "github: dispatch queued for issue #%s (%s -> %s) generation %s",
-                item.get("number"), prev_status, new_status, generation,
+                item.get("number"),
+                prev_status,
+                new_status,
+                generation,
             )
-        elif label is not None and prev_status in GITHUB_DISPATCH_FROM and not trigger_enabled:
+        elif (
+            label is not None
+            and prev_status in GITHUB_DISPATCH_FROM
+            and not trigger_enabled
+        ):
             log.info(
                 "github: issue #%s reached %s but trigger %s is not enabled for this project — no dispatch",
-                item.get("number"), new_status, label,
+                item.get("number"),
+                new_status,
+                label,
             )
         else:
             log.info(
                 "github: observed issue #%s transition %s -> %s (no dispatch)",
-                item.get("number"), prev_status, new_status,
+                item.get("number"),
+                prev_status,
+                new_status,
             )
         observations[item_id] = record
 
@@ -1214,7 +1309,9 @@ def github_dispatch_fires(ps: dict) -> list[dict]:
         entry = ps["github_outbox"][gen]
         if entry.get("dispatched"):
             continue
-        fires.append({"issue": entry["issue"], "label": entry["label"], "_generation": gen})
+        fires.append(
+            {"issue": entry["issue"], "label": entry["label"], "_generation": gen}
+        )
     return fires
 
 
@@ -1239,7 +1336,9 @@ def github_shadow_status(status_name: str | None) -> str | None:
     return STATUS_TO_LABEL.get(status_name) if status_name else None
 
 
-def github_shadow_write(client: GitHubProject, proj: dict, ps: dict, changed: list[str]) -> None:
+def github_shadow_write(
+    client: GitHubProject, proj: dict, ps: dict, changed: list[str]
+) -> None:
     """Mirror changed items' Status into the label shadow (full replacement).
 
     Single writer, cross-scope full replacement of all ten shadow labels with
@@ -1264,21 +1363,29 @@ def github_shadow_write(client: GitHubProject, proj: dict, ps: dict, changed: li
         if live != intended:
             log.info(
                 "github: shadow skipped for issue #%s — Status moved %s -> %s since observation",
-                number, intended, live,
+                number,
+                intended,
+                live,
             )
             continue
         mapped = github_shadow_status(intended)
         if mapped is None:
             # Unmapped Status (e.g. Closed, or a schema option outside the fixed
             # ten): leave labels untouched rather than stripping the shadow.
-            log.info("github: issue #%s at unmapped Status %s — shadow left unchanged", number, intended)
+            log.info(
+                "github: issue #%s at unmapped Status %s — shadow left unchanged",
+                number,
+                intended,
+            )
             continue
         add = [mapped]
         remove = [lbl for lbl in SHADOW_LABELS if lbl != mapped]
         try:
             client.set_labels(number, add=add, remove=remove)
         except Exception as e:  # noqa: BLE001
-            log.warning("github: shadow label write failed for issue #%s: %s", number, e)
+            log.warning(
+                "github: shadow label write failed for issue #%s: %s", number, e
+            )
             continue
         try:
             labels = set(client.issue_labels(number))
@@ -1288,7 +1395,9 @@ def github_shadow_write(client: GitHubProject, proj: dict, ps: dict, changed: li
         if stray or (mapped and mapped not in labels):
             log.warning(
                 "github: shadow read-back mismatch for issue #%s — want %s, stray %s",
-                number, mapped, sorted(stray),
+                number,
+                mapped,
+                sorted(stray),
             )
 
 
@@ -1300,7 +1409,11 @@ def _conversation_shadow_label(conv: dict, ps: dict) -> str | None:
     if status == "failed":
         return FAILED_LABEL
     if status == "done":
-        return MR_READY_LABEL if conversation_has_mr(ps, str(conv.get("issue_iid"))) else FOR_HUMAN_LABEL
+        return (
+            MR_READY_LABEL
+            if conversation_has_mr(ps, str(conv.get("issue_iid")))
+            else FOR_HUMAN_LABEL
+        )
     if status == "working":
         return active_label(conv)
     kind = conv.get("kind")
@@ -1316,7 +1429,9 @@ def github_conversation_status(ps: dict, number) -> str | None:
     return LABEL_TO_STATUS.get(label) if label else None
 
 
-def github_prune_recovery(client: GitHubProject, proj: dict, ps: dict, present: set) -> None:
+def github_prune_recovery(
+    client: GitHubProject, proj: dict, ps: dict, present: set
+) -> None:
     """Re-add open issues known to state but absent from the project.
 
     Pruning an item silently destroys its Status; we re-add the item and restore
@@ -1343,7 +1458,11 @@ def github_prune_recovery(client: GitHubProject, proj: dict, ps: dict, present: 
             status = ps.get("github_restore", {}).get(str(number))
             if status is None:
                 shadow = next(
-                    (lbl for lbl in client.issue_labels(number) if lbl in LABEL_TO_STATUS),
+                    (
+                        lbl
+                        for lbl in client.issue_labels(number)
+                        if lbl in LABEL_TO_STATUS
+                    ),
                     None,
                 )
                 status = LABEL_TO_STATUS.get(shadow, "Triage")
@@ -1360,11 +1479,17 @@ def github_prune_recovery(client: GitHubProject, proj: dict, ps: dict, present: 
             "option_id": client.status_option_id(status),
             "generation": None,  # force re-observation next tick, adopt-only
         }
-        log.info("github: prune recovery re-added issue #%s as item %s at Status %s",
-                 number, new_item_id, status)
+        log.info(
+            "github: prune recovery re-added issue #%s as item %s at Status %s",
+            number,
+            new_item_id,
+            status,
+        )
 
 
-def fetch_github_inputs(client: GitHubProject, proj: dict, ps: dict, triggers=None) -> dict:
+def fetch_github_inputs(
+    client: GitHubProject, proj: dict, ps: dict, triggers=None
+) -> dict:
     """Remote-poll one GitHub project: Status diff, shadow mirror, prune recovery.
 
     Runs in the parallel per-project fetch phase against an isolated poll-state
@@ -1380,8 +1505,11 @@ def fetch_github_inputs(client: GitHubProject, proj: dict, ps: dict, triggers=No
         github_prune_recovery(client, proj, ps, diff["present"])
         github_shadow_write(client, proj, ps, diff["changed"])
     else:
-        log.info("bootstrap: github project %s adopted %d item(s), none dispatched",
-                 proj.get("path"), len(items))
+        log.info(
+            "bootstrap: github project %s adopted %d item(s), none dispatched",
+            proj.get("path"),
+            len(items),
+        )
     return {
         "poll_state": ps,
         "comments": [],
@@ -1469,7 +1597,9 @@ def vault_queue_fire(outbox: dict, item: dict, generation: str) -> None:
     }
 
 
-def poll_vault_status(client, proj: dict, ps: dict, items: list[dict], triggers=None) -> dict:
+def poll_vault_status(
+    client, proj: dict, ps: dict, items: list[dict], triggers=None
+) -> dict:
     """Diff this tick's notes against recorded observations (mirror of
     :func:`poll_github_status`).
 
@@ -1509,17 +1639,25 @@ def poll_vault_status(client, proj: dict, ps: dict, items: list[dict], triggers=
             observations[item_id] = record
             log.info(
                 "vault: adopted first-seen note %s at status %s — not dispatched",
-                item.get("note_path"), item.get("status"),
+                item.get("note_path"),
+                item.get("status"),
             )
             continue
         if prev.get("generation") == generation:
             # Status unchanged. Re-check a note deferred while blocked; fire once
             # its blocker has finished (no transition of its own signals that).
-            if prev.get("deferred") and vault_trigger_enabled(item, enabled) and not vault_is_blocked(item, index):
+            if (
+                prev.get("deferred")
+                and vault_trigger_enabled(item, enabled)
+                and not vault_is_blocked(item, index)
+            ):
                 vault_queue_fire(outbox, item, generation)
                 record["deferred"] = False
                 observations[item_id] = record
-                log.info("vault: deferred note %s now unblocked — dispatch queued", item.get("note_path"))
+                log.info(
+                    "vault: deferred note %s now unblocked — dispatch queued",
+                    item.get("note_path"),
+                )
             continue
 
         prev_status = prev.get("status")
@@ -1531,18 +1669,23 @@ def poll_vault_status(client, proj: dict, ps: dict, items: list[dict], triggers=
                 record["deferred"] = True  # re-checked each tick until unblocked
                 log.info(
                     "vault: note %s reached `agent` but is blocked by %s — deferred",
-                    item.get("note_path"), blocker,
+                    item.get("note_path"),
+                    blocker,
                 )
             else:
                 vault_queue_fire(outbox, item, generation)
                 log.info(
                     "vault: dispatch queued for note %s (%s -> %s)",
-                    item.get("note_path"), prev_status, new_status,
+                    item.get("note_path"),
+                    prev_status,
+                    new_status,
                 )
         else:
             log.info(
                 "vault: observed note %s transition %s -> %s (no dispatch)",
-                item.get("note_path"), prev_status, new_status,
+                item.get("note_path"),
+                prev_status,
+                new_status,
             )
         observations[item_id] = record
 
@@ -1556,7 +1699,9 @@ def vault_dispatch_fires(ps: dict) -> list[dict]:
         entry = ps["vault_outbox"][gen]
         if entry.get("dispatched"):
             continue
-        fires.append({"issue": entry["issue"], "label": entry["label"], "_generation": gen})
+        fires.append(
+            {"issue": entry["issue"], "label": entry["label"], "_generation": gen}
+        )
     return fires
 
 
@@ -1585,7 +1730,8 @@ def fetch_vault_inputs(client, proj: dict, ps: dict, triggers=None) -> dict:
     if not ps.get("bootstrapped"):
         log.info(
             "bootstrap: vault %s adopted %d note(s), none dispatched",
-            proj.get("path"), len(items),
+            proj.get("path"),
+            len(items),
         )
     return {
         "poll_state": ps,
@@ -1625,19 +1771,26 @@ def fetch_issue_context(gl: GitLab, proj: dict, iid) -> str:
         # thread context is a later slice. Skip the GitLab-only notes/links API.
         return ""
     try:
-        notes = gl.get(f"projects/{proj['id']}/issues/{iid}/notes", sort="asc", per_page=100)
+        notes = gl.get(
+            f"projects/{proj['id']}/issues/{iid}/notes", sort="asc", per_page=100
+        )
         thread = [
             f"[{n['author']['username']}] {n['body'][:1500]}"
-            for n in notes if not n.get("system")
+            for n in notes
+            if not n.get("system")
         ][-20:]
         links = gl.get(f"projects/{proj['id']}/issues/{iid}/links", per_page=20)
-        linked = [f"- {li['title']} ({li['state']}) {li['web_url']}" for li in links[:10]]
+        linked = [
+            f"- {li['title']} ({li['state']}) {li['web_url']}" for li in links[:10]
+        ]
     except Exception as e:  # noqa: BLE001 — context is best-effort, never blocks dispatch
         log.warning("issue !%s context fetch failed: %s", iid, e)
         return ""
     parts = []
     if thread:
-        parts.append("Existing issue comments (oldest first):\n\n" + "\n\n".join(thread))
+        parts.append(
+            "Existing issue comments (oldest first):\n\n" + "\n\n".join(thread)
+        )
     if linked:
         parts.append("Linked issues:\n" + "\n".join(linked))
     return "\n\n".join(parts)[:8000]
@@ -1704,7 +1857,9 @@ def valid_jira_field_id(raw) -> bool:
 
 def valid_jira_custom_fields_shape(raw) -> bool:
     return isinstance(raw, dict) and all(
-        valid_jira_custom_label(label) and isinstance(field_id, str) and bool(field_id.strip())
+        valid_jira_custom_label(label)
+        and isinstance(field_id, str)
+        and bool(field_id.strip())
         for label, field_id in raw.items()
     )
 
@@ -1733,7 +1888,9 @@ def fetch_jira_context(proj: dict, issue: dict, jira_defaults: dict | None) -> s
         log.warning("Jira context custom field configuration is invalid")
         return ""
     max_keys = int(cfg.get("max_issues") or 3)
-    keys = jira_keys_from_texts(issue.get("title"), issue.get("description"), max_keys=max_keys)
+    keys = jira_keys_from_texts(
+        issue.get("title"), issue.get("description"), max_keys=max_keys
+    )
     if not keys:
         return ""
     helper_raw = cfg.get("helper")
@@ -1803,13 +1960,21 @@ def fetch_jira_context(proj: dict, issue: dict, jira_defaults: dict | None) -> s
             )
         except Exception as e:  # noqa: BLE001 — Jira context is optional.
             log.warning("Jira context fetch failed for %s: %s", key, e)
-            parts.append(f"Jira issue: {key}\nFetch failed; use {base_url}/browse/{key}.")
+            parts.append(
+                f"Jira issue: {key}\nFetch failed; use {base_url}/browse/{key}."
+            )
             continue
         if proc.returncode == 0 and proc.stdout.strip():
             parts.append(proc.stdout.strip())
         else:
-            log.warning("Jira context fetch failed for %s: %s", key, (proc.stderr or proc.stdout)[-500:])
-            parts.append(f"Jira issue: {key}\nFetch failed; use {base_url}/browse/{key}.")
+            log.warning(
+                "Jira context fetch failed for %s: %s",
+                key,
+                (proc.stderr or proc.stdout)[-500:],
+            )
+            parts.append(
+                f"Jira issue: {key}\nFetch failed; use {base_url}/browse/{key}."
+            )
     return "\n\n".join(parts)[:12000]
 
 
@@ -1840,7 +2005,9 @@ def vault_model_hint(model: str | None) -> str | None:
     return f"[{m}]" if ":" in m else f"[claude:{m}]"
 
 
-def make_vault_conversation(proj: dict, issue: dict, kind: str, hint_texts: list, defaults: dict) -> dict:
+def make_vault_conversation(
+    proj: dict, issue: dict, kind: str, hint_texts: list, defaults: dict
+) -> dict:
     """A conversation for a vault task note — built from the note itself (no API,
     no worktree; the worker runs in the vault so it loads AGENTS.md natively)."""
     hints = [h for h in (vault_model_hint(issue.get("model")), *hint_texts) if h]
@@ -1941,7 +2108,9 @@ def make_conversation(
     }
 
 
-def make_mr_conversation(proj: dict, mr: dict, key: str, kind: str, hint_texts: list, defaults: dict) -> dict:
+def make_mr_conversation(
+    proj: dict, mr: dict, key: str, kind: str, hint_texts: list, defaults: dict
+) -> dict:
     spec = parse_hint(*hint_texts) or spec_from_string(defaults[kind])
     slug = proj["path"].replace("/", "-")
     session_dir = CONVOS_DIR / f"{slug}-mr-{mr['iid']}-{key.replace(':', '-')}"
@@ -2002,7 +2171,9 @@ def parse_mr_iids(text: str, proj: dict) -> list[str]:
     return sorted(iids, key=int)
 
 
-def fetch_mr(gl: GitLab, proj: dict, mr_iid: str, *, raise_transient: bool = False) -> dict | None:
+def fetch_mr(
+    gl: GitLab, proj: dict, mr_iid: str, *, raise_transient: bool = False
+) -> dict | None:
     try:
         return gl.get(f"projects/{proj['id']}/merge_requests/{mr_iid}")
     except requests.HTTPError as e:
@@ -2011,12 +2182,16 @@ def fetch_mr(gl: GitLab, proj: dict, mr_iid: str, *, raise_transient: bool = Fal
             log.warning("merge request !%s fetch returned 404", mr_iid)
             return None
         if raise_transient:
-            raise TransientMRFetchError(f"merge request !{mr_iid} fetch failed: {e}") from e
+            raise TransientMRFetchError(
+                f"merge request !{mr_iid} fetch failed: {e}"
+            ) from e
         log.warning("merge request !%s fetch failed: %s", mr_iid, e)
         return None
     except requests.RequestException as e:
         if raise_transient:
-            raise TransientMRFetchError(f"merge request !{mr_iid} fetch failed: {e}") from e
+            raise TransientMRFetchError(
+                f"merge request !{mr_iid} fetch failed: {e}"
+            ) from e
         log.warning("merge request !%s fetch failed: %s", mr_iid, e)
         return None
 
@@ -2040,19 +2215,26 @@ def surface_state(value: str | None) -> str | None:
     return str(value).lower() if value is not None else None
 
 
-def issue_is_open_for_plain_resume(gl: GitLab, proj: dict, iid: str, gesture: dict) -> bool:
+def issue_is_open_for_plain_resume(
+    gl: GitLab, proj: dict, iid: str, gesture: dict
+) -> bool:
     state = surface_state(gesture.get("issue_state") or gesture.get("state"))
     if state is None:
         issue = fetch_issue(gl, proj, iid)
         if issue is None:
-            log.warning("issue !%s plain owner comment ignored: could not determine issue state", iid)
+            log.warning(
+                "issue !%s plain owner comment ignored: could not determine issue state",
+                iid,
+            )
             return False
         state = surface_state(issue.get("state"))
     if state == "closed":
         log.info("issue !%s plain owner comment ignored: issue is closed", iid)
         return False
     if state not in {"opened", "open"}:
-        log.warning("issue !%s plain owner comment ignored: unknown issue state %r", iid, state)
+        log.warning(
+            "issue !%s plain owner comment ignored: unknown issue state %r", iid, state
+        )
         return False
     return True
 
@@ -2069,28 +2251,45 @@ def mr_is_open_for_plain_resume(
     gesture: dict,
     mr: dict | None,
 ) -> tuple[bool, dict | None]:
-    state = surface_state(gesture.get("mr_state") or gesture.get("state") or ((mr or {}).get("state")))
+    state = surface_state(
+        gesture.get("mr_state") or gesture.get("state") or ((mr or {}).get("state"))
+    )
     if state in {"closed", "merged"} or (mr is not None and mr.get("merged_at")):
-        log.info("merge request !%s plain owner comment ignored: merge request is closed/merged", mr_iid)
+        log.info(
+            "merge request !%s plain owner comment ignored: merge request is closed/merged",
+            mr_iid,
+        )
         return False, mr
     if state in {"opened", "open"}:
         return True, mr
     if mr is None:
         mr = fetch_mr(gl, proj, mr_iid, raise_transient=True)
     if mr is None:
-        log.warning("merge request !%s plain owner comment ignored: could not determine merge request state", mr_iid)
+        log.warning(
+            "merge request !%s plain owner comment ignored: could not determine merge request state",
+            mr_iid,
+        )
         return False, None
     if mr_is_closed_or_merged(mr):
-        log.info("merge request !%s plain owner comment ignored: merge request is closed/merged", mr_iid)
+        log.info(
+            "merge request !%s plain owner comment ignored: merge request is closed/merged",
+            mr_iid,
+        )
         return False, mr
     state = surface_state(mr.get("state"))
     if state not in {"opened", "open"}:
-        log.warning("merge request !%s plain owner comment ignored: unknown merge request state %r", mr_iid, state)
+        log.warning(
+            "merge request !%s plain owner comment ignored: unknown merge request state %r",
+            mr_iid,
+            state,
+        )
         return False, mr
     return True, mr
 
 
-def record_mr_mapping(ps: dict, conversation_key: str, mr: dict, mapped_from: str) -> bool:
+def record_mr_mapping(
+    ps: dict, conversation_key: str, mr: dict, mapped_from: str
+) -> bool:
     conversation_key = str(conversation_key)
     conv = ps["conversations"].get(conversation_key)
     if conv is None:
@@ -2121,7 +2320,12 @@ def record_mr_mapping(ps: dict, conversation_key: str, mr: dict, mapped_from: st
     if mr_iid not in mr_iids:
         mr_iids.append(mr_iid)
         mr_iids.sort(key=int)
-    log.info("mapped merge request !%s -> issue !%s via %s", mr_iid, conversation_key, mapped_from)
+    log.info(
+        "mapped merge request !%s -> issue !%s via %s",
+        mr_iid,
+        conversation_key,
+        mapped_from,
+    )
     return True
 
 
@@ -2131,7 +2335,11 @@ def parse_mr_marker(description: str | None, proj: dict) -> str | None:
         source_project = fields.get("source_project")
         source_issue_iid = fields.get("source_issue_iid")
         valid_sources = {proj["path"], f"{proj['host']}/{proj['path']}"}
-        if source_project not in valid_sources or not source_issue_iid or not source_issue_iid.isdigit():
+        if (
+            source_project not in valid_sources
+            or not source_issue_iid
+            or not source_issue_iid.isdigit()
+        ):
             continue
         issue_iid = str(int(source_issue_iid))
         conversation_key = fields.get("conversation_key")
@@ -2151,7 +2359,9 @@ def indexed_issue_iid(indexed: dict) -> str | None:
     return None
 
 
-def resolve_mr_mapping(gl: GitLab, proj: dict, ps: dict, mr_iid: str) -> tuple[dict | None, dict | None]:
+def resolve_mr_mapping(
+    gl: GitLab, proj: dict, ps: dict, mr_iid: str
+) -> tuple[dict | None, dict | None]:
     mr_iid = str(mr_iid)
     index = ps.setdefault("mr_index", {})
     indexed = index.get(mr_iid) or {}
@@ -2184,7 +2394,9 @@ def resolve_mr_mapping(gl: GitLab, proj: dict, ps: dict, mr_iid: str) -> tuple[d
     return None, mr
 
 
-def capture_mrs_from_reply(gl: GitLab, proj: dict, ps: dict, iid: str, conv: dict, reply: str) -> None:
+def capture_mrs_from_reply(
+    gl: GitLab, proj: dict, ps: dict, iid: str, conv: dict, reply: str
+) -> None:
     """Primary MR mapping path: worker final reply references an MR it opened."""
     if proj.get("forge") == "github":
         # GitHub PR mapping is a later slice; the terminal split still routes a
@@ -2192,7 +2404,9 @@ def capture_mrs_from_reply(gl: GitLab, proj: dict, ps: dict, iid: str, conv: dic
         # which stays empty here (no MR capture in slice 1).
         return
     for mr_iid in parse_mr_iids(reply, proj):
-        if mr_iid in conv.setdefault("mr_iids", []) or mr_iid in ps.setdefault("mr_index", {}):
+        if mr_iid in conv.setdefault("mr_iids", []) or mr_iid in ps.setdefault(
+            "mr_index", {}
+        ):
             continue
         mr = fetch_mr(gl, proj, mr_iid)
         if mr is not None and parse_mr_marker(mr.get("description"), proj) == str(iid):
@@ -2236,7 +2450,9 @@ def find_mr_thread_conversation(gl, proj, convs, mr_iid, gesture):
         return None
     notes = discussion.get("notes") or []
     bot_user_id = proj.get("bot_user_id")
-    if not any(str((n.get("author") or {}).get("id")) == str(bot_user_id) for n in notes):
+    if not any(
+        str((n.get("author") or {}).get("id")) == str(bot_user_id) for n in notes
+    ):
         return None
     note_ids = {str(n.get("id")) for n in notes}
     for key, conv in candidates:
@@ -2249,7 +2465,9 @@ def find_mr_thread_conversation(gl, proj, convs, mr_iid, gesture):
     return None
 
 
-def resume_mr_thread(gl, proj, conv_key, conv, mr_iid, gesture, question, retry_mr_gestures):
+def resume_mr_thread(
+    gl, proj, conv_key, conv, mr_iid, gesture, question, retry_mr_gestures
+):
     """Queue a threaded reply onto an existing standalone MR Q&A conversation.
 
     Mirrors the mapped-conversation resume path (echo guard, open-state check for
@@ -2260,7 +2478,10 @@ def resume_mr_thread(gl, proj, conv_key, conv, mr_iid, gesture, question, retry_
     if last_reply_body_hash:
         raw_body = gesture.get("comment_body") or ""
         status_stripped_body, _, _ = split_status(raw_body)
-        if last_reply_body_hash in {body_hash(raw_body), body_hash(status_stripped_body)}:
+        if last_reply_body_hash in {
+            body_hash(raw_body),
+            body_hash(status_stripped_body),
+        }:
             log.info(
                 "echo guard: dropped owner comment on merge request !%s note %s matching last posted reply",
                 mr_iid,
@@ -2298,9 +2519,13 @@ def resume_mr_thread(gl, proj, conv_key, conv, mr_iid, gesture, question, retry_
         )
     conv["next_reply_target"] = mr_reply_target(mr_iid, gesture)
     if question is not None:
-        conv["pending"].append(mr_comment_context(mr, gesture, question) if mr is not None else question)
+        conv["pending"].append(
+            mr_comment_context(mr, gesture, question) if mr is not None else question
+        )
     else:
-        conv["pending"].append(mr_comment_context(mr, gesture) if mr is not None else gesture["body"])
+        conv["pending"].append(
+            mr_comment_context(mr, gesture) if mr is not None else gesture["body"]
+        )
     log.info(
         "resume: merge request !%s note %s -> conversation %s (thread reply)",
         mr_iid,
@@ -2309,7 +2534,18 @@ def resume_mr_thread(gl, proj, conv_key, conv, mr_iid, gesture, question, retry_
     )
 
 
-def assemble(gl, proj, ps, comments, label_fires, new_awards, owner, defaults, triggers, jira_defaults=None):
+def assemble(
+    gl,
+    proj,
+    ps,
+    comments,
+    label_fires,
+    new_awards,
+    owner,
+    defaults,
+    triggers,
+    jira_defaults=None,
+):
     """Merge this cycle's gestures into per-conversation pending queues (coalescing)."""
     convs = ps["conversations"]
     retry_mr_gestures = []
@@ -2330,7 +2566,11 @@ def assemble(gl, proj, ps, comments, label_fires, new_awards, owner, defaults, t
     for g in all_comments:
         if g.get("kind") == "mr":
             mr_iid = str(g["mr_iid"])
-            question = agent_mention_question(g.get("comment_body") or "") if "mention" in triggers else None
+            question = (
+                agent_mention_question(g.get("comment_body") or "")
+                if "mention" in triggers
+                else None
+            )
 
             # A reply inside an already-answered standalone MR thread continues
             # that same conversation — no @agent re-tag. Issue-mapped MRs are
@@ -2349,7 +2589,16 @@ def assemble(gl, proj, ps, comments, label_fires, new_awards, owner, defaults, t
                 continue
             if thread_hit is not None:
                 thread_key, thread_conv = thread_hit
-                resume_mr_thread(gl, proj, thread_key, thread_conv, mr_iid, g, question, retry_mr_gestures)
+                resume_mr_thread(
+                    gl,
+                    proj,
+                    thread_key,
+                    thread_conv,
+                    mr_iid,
+                    g,
+                    question,
+                    retry_mr_gestures,
+                )
                 continue
 
             try:
@@ -2373,14 +2622,29 @@ def assemble(gl, proj, ps, comments, label_fires, new_awards, owner, defaults, t
                     )
                     continue
                 if mr is None:
-                    log.warning("merge request !%s @agent comment ignored: MR could not be fetched", mr_iid)
+                    log.warning(
+                        "merge request !%s @agent comment ignored: MR could not be fetched",
+                        mr_iid,
+                    )
                     continue
                 conv_key = f"mr:{mr_iid}:note:{g.get('note_id') or g.get('event_id') or uuid.uuid4().hex[:8]}"
-                conv = make_mr_conversation(proj, mr, conv_key, "qa", [g.get("comment_body"), mr.get("description")], defaults)
+                conv = make_mr_conversation(
+                    proj,
+                    mr,
+                    conv_key,
+                    "qa",
+                    [g.get("comment_body"), mr.get("description")],
+                    defaults,
+                )
                 conv["next_reply_target"] = mr_reply_target(mr_iid, g)
                 conv["pending"].append(mr_comment_context(mr, g, question))
                 convs[conv_key] = conv
-                log.info("new qa conversation on merge request !%s (%s:%s)", mr_iid, conv["provider"], conv["model"])
+                log.info(
+                    "new qa conversation on merge request !%s (%s:%s)",
+                    mr_iid,
+                    conv["provider"],
+                    conv["model"],
+                )
                 continue
 
             if question is not None and mr is None:
@@ -2410,22 +2674,45 @@ def assemble(gl, proj, ps, comments, label_fires, new_awards, owner, defaults, t
                 if issue is None:
                     if mr is not None:
                         conv_key = f"mr:{mr_iid}:note:{g.get('note_id') or g.get('event_id') or uuid.uuid4().hex[:8]}"
-                        conv = make_mr_conversation(proj, mr, conv_key, "qa", [g.get("comment_body"), mr.get("description")], defaults)
+                        conv = make_mr_conversation(
+                            proj,
+                            mr,
+                            conv_key,
+                            "qa",
+                            [g.get("comment_body"), mr.get("description")],
+                            defaults,
+                        )
                         conv["next_reply_target"] = mr_reply_target(mr_iid, g)
                         conv["pending"].append(mr_comment_context(mr, g, question))
                         convs[conv_key] = conv
                         log.info(
                             "new qa conversation on merge request !%s after mapped issue !%s fetch failed (%s:%s)",
-                            mr_iid, iid, conv["provider"], conv["model"],
+                            mr_iid,
+                            iid,
+                            conv["provider"],
+                            conv["model"],
                         )
                     continue
-                conv = make_conversation(gl, proj, issue, "qa", [g.get("comment_body"), issue.get("description")], defaults, jira_defaults)
+                conv = make_conversation(
+                    gl,
+                    proj,
+                    issue,
+                    "qa",
+                    [g.get("comment_body"), issue.get("description")],
+                    defaults,
+                    jira_defaults,
+                )
                 convs[iid] = conv
                 if mr is not None:
-                    record_mr_mapping(ps, iid, mr, mapping.get("mapped_from") or "mr_comment")
+                    record_mr_mapping(
+                        ps, iid, mr, mapping.get("mapped_from") or "mr_comment"
+                    )
                 log.info(
                     "new qa conversation on issue !%s from merge request !%s (%s:%s)",
-                    iid, mr_iid, conv["provider"], conv["model"],
+                    iid,
+                    mr_iid,
+                    conv["provider"],
+                    conv["model"],
                 )
             last_reply_body_hash = conv.get("last_reply_body_hash")
             if last_reply_body_hash:
@@ -2455,7 +2742,9 @@ def assemble(gl, proj, ps, comments, label_fires, new_awards, owner, defaults, t
                 if not is_open:
                     continue
                 try:
-                    has_bot_note = discussion_has_bot_note(gl, proj, "mr", mr_iid, g.get("discussion_id"))
+                    has_bot_note = discussion_has_bot_note(
+                        gl, proj, "mr", mr_iid, g.get("discussion_id")
+                    )
                 except TransientDiscussionLookupError as e:
                     retry_mr_gestures.append(g)
                     log.warning(
@@ -2477,24 +2766,39 @@ def assemble(gl, proj, ps, comments, label_fires, new_awards, owner, defaults, t
                 provider_changed = apply_hint(conv, hint)
                 log.info(
                     "resume hint: merge request !%s -> issue !%s %s:%s:%s%s",
-                    mr_iid, iid, conv["provider"], conv["model"], conv["effort"],
+                    mr_iid,
+                    iid,
+                    conv["provider"],
+                    conv["model"],
+                    conv["effort"],
                     " (fresh provider session)" if provider_changed else "",
                 )
             conv["next_reply_target"] = mr_reply_target(mr_iid, g)
             if question is not None:
-                conv["pending"].append(mr_comment_context(mr, g, question) if mr is not None else question)
+                conv["pending"].append(
+                    mr_comment_context(mr, g, question) if mr is not None else question
+                )
             else:
-                conv["pending"].append(mr_comment_context(mr, g) if mr is not None else g["body"])
+                conv["pending"].append(
+                    mr_comment_context(mr, g) if mr is not None else g["body"]
+                )
             continue
 
         iid = str(g["iid"])
         conv = convs.get(iid)
-        question = agent_mention_question(g.get("body") or "") if "mention" in triggers else None
+        question = (
+            agent_mention_question(g.get("body") or "")
+            if "mention" in triggers
+            else None
+        )
         if conv is not None:
             last_reply_body_hash = conv.get("last_reply_body_hash")
             if last_reply_body_hash:
                 status_stripped_body, _, _ = split_status(g["body"])
-                incoming_hashes = {body_hash(g["body"]), body_hash(status_stripped_body)}
+                incoming_hashes = {
+                    body_hash(g["body"]),
+                    body_hash(status_stripped_body),
+                }
                 if last_reply_body_hash in incoming_hashes:
                     log.info(
                         "echo guard: dropped owner comment on issue !%s note %s matching last posted reply",
@@ -2506,7 +2810,9 @@ def assemble(gl, proj, ps, comments, label_fires, new_awards, owner, defaults, t
                 if not issue_is_open_for_plain_resume(gl, proj, iid, g):
                     continue
                 try:
-                    has_bot_note = discussion_has_bot_note(gl, proj, "issue", iid, g.get("discussion_id"))
+                    has_bot_note = discussion_has_bot_note(
+                        gl, proj, "issue", iid, g.get("discussion_id")
+                    )
                 except TransientDiscussionLookupError as e:
                     retry_mr_gestures.append(g)
                     log.warning(
@@ -2528,7 +2834,10 @@ def assemble(gl, proj, ps, comments, label_fires, new_awards, owner, defaults, t
                 provider_changed = apply_hint(conv, hint)
                 log.info(
                     "resume hint: issue !%s -> %s:%s:%s%s",
-                    iid, conv["provider"], conv["model"], conv["effort"],
+                    iid,
+                    conv["provider"],
+                    conv["model"],
+                    conv["effort"],
                     " (fresh provider session)" if provider_changed else "",
                 )
             conv["next_reply_target"] = issue_reply_target(iid, g)
@@ -2539,11 +2848,24 @@ def assemble(gl, proj, ps, comments, label_fires, new_awards, owner, defaults, t
             issue = fetch_issue(gl, proj, iid)
             if issue is None:
                 continue
-            conv = make_conversation(gl, proj, issue, "qa", [g["body"], issue.get("description")], defaults, jira_defaults)
+            conv = make_conversation(
+                gl,
+                proj,
+                issue,
+                "qa",
+                [g["body"], issue.get("description")],
+                defaults,
+                jira_defaults,
+            )
             conv["next_reply_target"] = issue_reply_target(iid, g)
             conv["pending"].append(question)
             convs[iid] = conv
-            log.info("new qa conversation on issue !%s (%s:%s)", iid, conv["provider"], conv["model"])
+            log.info(
+                "new qa conversation on issue !%s (%s:%s)",
+                iid,
+                conv["provider"],
+                conv["model"],
+            )
 
     ps["pending_mr_comment_gestures"] = retry_mr_gestures[-1000:]
 
@@ -2557,12 +2879,24 @@ def assemble(gl, proj, ps, comments, label_fires, new_awards, owner, defaults, t
                 f"The issue has been labeled `{label}` again. Pick the work back up per the issue."
             )
         else:
-            conv = make_conversation(gl, proj, issue, label, [issue.get("description")], defaults, jira_defaults)
+            conv = make_conversation(
+                gl,
+                proj,
+                issue,
+                label,
+                [issue.get("description")],
+                defaults,
+                jira_defaults,
+            )
             conv["next_reply_target"] = issue_reply_target(iid)
             convs[iid] = conv
             log.info(
                 "new %s conversation on issue !%s (%s:%s:%s)",
-                label, iid, conv["provider"], conv["model"], conv["effort"],
+                label,
+                iid,
+                conv["provider"],
+                conv["model"],
+                conv["effort"],
             )
 
     parked_notes = {
@@ -2633,7 +2967,9 @@ def read_pid(path: str | Path | None) -> int | None:
         return None
 
 
-def terminate_process_group(pid: int | str | None, grace: int = TERM_GRACE_SECONDS) -> None:
+def terminate_process_group(
+    pid: int | str | None, grace: int = TERM_GRACE_SECONDS
+) -> None:
     if not pid:
         return
     pid = int(pid)
@@ -2669,7 +3005,7 @@ def zshenv_path(base_env: dict[str, str]) -> str | None:
     _ZSHENV_PATH_LOADED = True
     try:
         result = subprocess.run(
-            ["/bin/zsh", "-lc", "print -r -- \"$PATH\""],
+            ["/bin/zsh", "-lc", 'print -r -- "$PATH"'],
             env=base_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -2771,7 +3107,9 @@ def tmux_kill_session(name: str | None) -> None:
         pass
 
 
-def tmux_launch_worker(session_name: str, cwd: str, worker_argv: list[str], env: dict) -> subprocess.CompletedProcess:
+def tmux_launch_worker(
+    session_name: str, cwd: str, worker_argv: list[str], env: dict
+) -> subprocess.CompletedProcess:
     """Start the worker wrapper detached in a named tmux session.
 
     The wrapper runs through a login shell (`zsh -lc 'exec …'`) so PATH is sourced
@@ -2794,12 +3132,18 @@ def tmux_launch_worker(session_name: str, cwd: str, worker_argv: list[str], env:
     )
     inner = (
         restore_config
-        + f"{shlex.quote(tb)} set-option -pt \"$TMUX_PANE\" remain-on-exit on; "
-        f"{shlex.quote(tb)} set-option -pt \"$TMUX_PANE\" @agent_worktree {shlex.quote(cwd)}; "
+        + f'{shlex.quote(tb)} set-option -pt "$TMUX_PANE" remain-on-exit on; '
+        f'{shlex.quote(tb)} set-option -pt "$TMUX_PANE" @agent_worktree {shlex.quote(cwd)}; '
         f"exec {worker}"
     )
     login_cmd = shlex.join(
-        ["/bin/zsh", "-lc", inner, "eastwatch-worker", *(env[name] for name in config_names)]
+        [
+            "/bin/zsh",
+            "-lc",
+            inner,
+            "eastwatch-worker",
+            *(env[name] for name in config_names),
+        ]
     )
     command = [tb, "new-session", "-d", "-s", session_name, "-c", cwd]
     for name in config_names:
@@ -2825,7 +3169,9 @@ def worker_env(conv: dict) -> dict:
         env.setdefault("XDG_CONFIG_HOME", os.path.join(home, ".config"))
     xdg_config_home = env.get("XDG_CONFIG_HOME")
     if xdg_config_home:
-        env.setdefault("PI_CODING_AGENT_DIR", os.path.join(xdg_config_home, "pi", "agent"))
+        env.setdefault(
+            "PI_CODING_AGENT_DIR", os.path.join(xdg_config_home, "pi", "agent")
+        )
     shell_path = zshenv_path(env)
     if shell_path:
         env["PATH"] = shell_path
@@ -2853,11 +3199,17 @@ def append_text(path: str | Path, text: str) -> None:
 
 
 def command_tail(stdout: str, stderr: str, max_chars: int = 500) -> str:
-    streams = [(label, text.strip()) for label, text in (("stdout", stdout), ("stderr", stderr)) if text.strip()]
+    streams = [
+        (label, text.strip())
+        for label, text in (("stdout", stdout), ("stderr", stderr))
+        if text.strip()
+    ]
     if not streams:
         return ""
     separator = "; "
-    overhead = sum(len(label) + 2 for label, _ in streams) + len(separator) * (len(streams) - 1)
+    overhead = sum(len(label) + 2 for label, _ in streams) + len(separator) * (
+        len(streams) - 1
+    )
     text_budget = max(0, max_chars - overhead)
     per_stream, remainder = divmod(text_budget, len(streams))
     parts = []
@@ -2996,8 +3348,12 @@ def render_stream_line(line: str) -> str | None:
                 out.append("· thinking…")
             elif bt == "tool_use":
                 arg = block.get("input") or {}
-                detail = arg.get("command") or arg.get("file_path") or arg.get("path") or ""
-                out.append(f"→ {block.get('name', '?')} {str(detail)[:PANE_DETAIL_MAX]}".rstrip())
+                detail = (
+                    arg.get("command") or arg.get("file_path") or arg.get("path") or ""
+                )
+                out.append(
+                    f"→ {block.get('name', '?')} {str(detail)[:PANE_DETAIL_MAX]}".rstrip()
+                )
         return "\n".join(out) + "\n" if out else None
     if etype == "result":
         return f"── {ev.get('subtype', 'done')}\n"
@@ -3056,7 +3412,9 @@ def render_pi_line(line: str) -> str | None:
             return ame.get("delta") or None
         if at == "text_end":
             return "\n"
-        return None  # toolcall_* deltas are noise; tool_execution_start renders the call
+        return (
+            None  # toolcall_* deltas are noise; tool_execution_start renders the call
+        )
     if etype == "tool_execution_start":
         name = ev.get("toolName") or "tool"
         detail = pi_tool_detail(ev.get("args"))
@@ -3205,7 +3563,9 @@ def drain_process(
             )
             collector.start_attempt("pi", 1, 1)
         else:
-            collector = ClaudeStreamCollector(journal, raw_capture_path=raw_capture_path(req))
+            collector = ClaudeStreamCollector(
+                journal, raw_capture_path=raw_capture_path(req)
+            )
 
     out_sink, err_sink = stream_sinks()
     out_pane = PaneWriter(out_sink, render)
@@ -3323,9 +3683,16 @@ def drain_process(
         if timed_out:
             collector.mark_timeout(timeout_seconds)
             write_stderr_tail(req, collector)
-            raise WorkerCommandError("timeout", f"command exceeded {timeout_seconds}s timeout")
+            raise WorkerCommandError(
+                "timeout", f"command exceeded {timeout_seconds}s timeout"
+            )
         proc.wait()
-        code = 0 if isinstance(collector, PiStreamCollector) and collector.outcome == "success" else (proc.returncode or 1)
+        code = (
+            0
+            if isinstance(collector, PiStreamCollector)
+            and collector.outcome == "success"
+            else (proc.returncode or 1)
+        )
         collector.mark_exit(code)
         write_stderr_tail(req, collector)
         return code, collector
@@ -3355,7 +3722,9 @@ def finish_provider_process(
     stderr_prefix: bytes = b"",
     collector: PiStreamCollector | None = None,
 ) -> tuple[int, PiStreamCollector] | tuple[int, str, str]:
-    grace = float(req.get("pi_settled_exit_grace_seconds", PI_SETTLED_EXIT_GRACE_SECONDS))
+    grace = float(
+        req.get("pi_settled_exit_grace_seconds", PI_SETTLED_EXIT_GRACE_SECONDS)
+    )
     owns_collector = collector is None
     if collector is None:
         journal = run_journal(req)
@@ -3400,7 +3769,9 @@ def run_provider_command(
             effort=req.get("effort"),
             provider="claude",
         )
-        collector = ClaudeStreamCollector(journal, raw_capture_path=raw_capture_path(req))
+        collector = ClaudeStreamCollector(
+            journal, raw_capture_path=raw_capture_path(req)
+        )
     proc = subprocess.Popen(
         cmd,
         cwd=req["cwd"],
@@ -3444,7 +3815,14 @@ def run_claude_request(req: dict) -> dict:
         if req.get("effort"):
             cmd += ["--effort", req["effort"]]
     else:
-        cmd += ["--resume", req["session_id"], req["text"], "--model", req["model"], *fmt]
+        cmd += [
+            "--resume",
+            req["session_id"],
+            req["text"],
+            "--model",
+            req["model"],
+            *fmt,
+        ]
         if req.get("effort"):
             cmd += ["--effort", req["effort"]]
 
@@ -3522,7 +3900,9 @@ def run_pi_provider_command(
         )
         collector = PiStreamCollector(
             journal,
-            grace_seconds=float(req.get("pi_settled_exit_grace_seconds", PI_SETTLED_EXIT_GRACE_SECONDS)),
+            grace_seconds=float(
+                req.get("pi_settled_exit_grace_seconds", PI_SETTLED_EXIT_GRACE_SECONDS)
+            ),
             raw_capture_path=raw_capture_path(req),
         )
         provider = cmd[cmd.index("--provider") + 1] if "--provider" in cmd else "pi"
@@ -3563,7 +3943,9 @@ def run_pi_provider_command(
     if proc is None:
         raise WorkerCommandError("launch", "pi process was not started")
     collector.session_id = sid
-    discovered = observation_req.get("session_file") or find_pi_session_file(observation_req, sid)
+    discovered = observation_req.get("session_file") or find_pi_session_file(
+        observation_req, sid
+    )
     collector.discover_session(discovered)
     result = finish_provider_process(
         proc,
@@ -3619,8 +4001,10 @@ def build_pi_argv(
         return [*cmd, "--session", session_file, pi_prompt_arg(prompt)]
     return [
         *cmd,
-        "--session-dir", req.get("session_dir") or req["cwd"],
-        "--session-id", sid,
+        "--session-dir",
+        req.get("session_dir") or req["cwd"],
+        "--session-id",
+        sid,
         pi_prompt_arg(prompt),
     ]
 
@@ -3648,7 +4032,9 @@ def snapshot_pi_session_file(session_file: str | None) -> tuple[int, int, str] |
     return stat.st_size, stat.st_mtime_ns, digest.hexdigest()
 
 
-def pi_session_changed(session_file: str | None, before: tuple[int, int, str] | None) -> bool:
+def pi_session_changed(
+    session_file: str | None, before: tuple[int, int, str] | None
+) -> bool:
     after = snapshot_pi_session_file(session_file)
     return after is not None and after != before
 
@@ -3678,7 +4064,9 @@ def run_pi_attempt(
             collector.mark_timeout(int(req.get("timeout_seconds", RUN_TIMEOUT_SECONDS)))
             raise WorkerCommandError("timeout", "pi command exceeded timeout")
         collector.start_attempt(provider, attempt + 1, attempts)
-        collector_note(collector, f"[pi-provider] {provider} attempt {attempt + 1}/{attempts}")
+        collector_note(
+            collector, f"[pi-provider] {provider} attempt {attempt + 1}/{attempts}"
+        )
         provider_result = run_pi_provider_command(req, cmd, remaining, sid, collector)
         if len(provider_result) == 3:
             code, stdout, stderr = provider_result
@@ -3705,8 +4093,15 @@ def run_pi_attempt(
             outcome="failure",
             exit_code=code,
         )
-        if provider == PI_DIRECT_PROVIDER and collector.auth_error_seen and attempt < attempts - 1:
-            collector_note(collector, f"pi copilot auth race (attempt {attempt + 1}/3), sleeping 25s")
+        if (
+            provider == PI_DIRECT_PROVIDER
+            and collector.auth_error_seen
+            and attempt < attempts - 1
+        ):
+            collector_note(
+                collector,
+                f"pi copilot auth race (attempt {attempt + 1}/3), sleeping 25s",
+            )
             sleep_for = min(25, max(0, deadline - time.time()))
             if sleep_for:
                 time.sleep(sleep_for)
@@ -3754,7 +4149,9 @@ def run_pi_request(req: dict) -> dict:
     )
     collector = PiStreamCollector(
         journal,
-        grace_seconds=float(req.get("pi_settled_exit_grace_seconds", PI_SETTLED_EXIT_GRACE_SECONDS)),
+        grace_seconds=float(
+            req.get("pi_settled_exit_grace_seconds", PI_SETTLED_EXIT_GRACE_SECONDS)
+        ),
         raw_capture_path=raw_capture_path(req),
     )
     try:
@@ -3769,9 +4166,17 @@ def run_pi_request(req: dict) -> dict:
         deadline = time.time() + int(req.get("timeout_seconds", RUN_TIMEOUT_SECONDS))
 
         first_provider = providers[0]
-        before = snapshot_pi_session_file(session_file) if first_provider == PI_HEADROOM_PROVIDER else None
-        cmd = build_pi_argv(req, first_provider, model, original_prompt, sid, session_file)
-        code, collector = run_pi_attempt(req, first_provider, cmd, deadline, sid, collector)
+        before = (
+            snapshot_pi_session_file(session_file)
+            if first_provider == PI_HEADROOM_PROVIDER
+            else None
+        )
+        cmd = build_pi_argv(
+            req, first_provider, model, original_prompt, sid, session_file
+        )
+        code, collector = run_pi_attempt(
+            req, first_provider, cmd, deadline, sid, collector
+        )
         if code == 0:
             return pi_result(req, first_provider, sid, session_file, code, collector)
 
@@ -3784,7 +4189,9 @@ def run_pi_request(req: dict) -> dict:
         if len(providers) == 1:
             raise WorkerCommandError("exit", first_failure, code)
 
-        recovered_file = find_pi_session_file(req, sid) if req["is_new"] else session_file
+        recovered_file = (
+            find_pi_session_file(req, sid) if req["is_new"] else session_file
+        )
         collector.discover_session(recovered_file)
         changed = pi_session_changed(recovered_file, before)
         tool_started = collector.attempt_tool_started
@@ -3799,7 +4206,10 @@ def run_pi_request(req: dict) -> dict:
                 if tool_started
                 else "malformed or oversized provider output made tool activity uncertain"
             )
-            collector_note(collector, f"[pi-fallback] blocked: {reason} without recoverable session")
+            collector_note(
+                collector,
+                f"[pi-fallback] blocked: {reason} without recoverable session",
+            )
             raise WorkerCommandError(
                 "exit",
                 f"{first_failure}; direct replay blocked because {reason}",
@@ -3847,7 +4257,9 @@ def run_pi_request(req: dict) -> dict:
                 collector.stdout_text,
                 collector.stderr_text,
             )
-            raise WorkerCommandError("exit", f"{direct_failure}; preceding {first_failure}", direct_code)
+            raise WorkerCommandError(
+                "exit", f"{direct_failure}; preceding {first_failure}", direct_code
+            )
         try:
             return pi_result(
                 req,
@@ -3858,13 +4270,17 @@ def run_pi_request(req: dict) -> dict:
                 collector,
             )
         except WorkerCommandError as e:
-            raise WorkerCommandError(e.kind, f"{e}; preceding {first_failure}", e.exit_code) from e
+            raise WorkerCommandError(
+                e.kind, f"{e}; preceding {first_failure}", e.exit_code
+            ) from e
     finally:
         write_stderr_tail(req, collector)
         collector.close()
 
 
-def write_worker_error(req: dict, kind: str, message: str, exit_code: int | None = None) -> None:
+def write_worker_error(
+    req: dict, kind: str, message: str, exit_code: int | None = None
+) -> None:
     atomic_write_json(
         req["error_path"],
         {
@@ -3963,7 +4379,9 @@ def prepare_issue_workspace(conv: dict) -> bool:
         conv["workspace_error"] = f"Forge start failed: {e}"
         return False
     if result.returncode != 0:
-        conv["workspace_error"] = f"Forge start failed: {command_tail(result.stdout, result.stderr)}"
+        conv["workspace_error"] = (
+            f"Forge start failed: {command_tail(result.stdout, result.stderr)}"
+        )
         return False
     try:
         payload = json.loads(result.stdout.strip().splitlines()[-1])
@@ -3980,7 +4398,12 @@ def prepare_issue_workspace(conv: dict) -> bool:
     conv["worktree_branch"] = branch
     conv["workspace_prepared"] = True
     conv.pop("workspace_error", None)
-    log.info("forge: prepared issue %s workspace %s (%s)", conv["issue_iid"], worktree, branch)
+    log.info(
+        "forge: prepared issue %s workspace %s (%s)",
+        conv["issue_iid"],
+        worktree,
+        branch,
+    )
     return True
 
 
@@ -4057,7 +4480,10 @@ def build_launch_prompt(conv: dict, msgs: list[str]) -> str:
         )
         if conv.get("mr_desc"):
             parts.append(f"MR description:\n\n{conv['mr_desc']}")
-        parts.append("Answer the following question about this merge request:\n\n" + "\n\n".join(msgs))
+        parts.append(
+            "Answer the following question about this merge request:\n\n"
+            + "\n\n".join(msgs)
+        )
     elif conv.get("forge") == "vault":
         parts = [
             f"You are working an Obsidian task note at `{conv.get('note_path')}` in this vault: "
@@ -4072,10 +4498,16 @@ def build_launch_prompt(conv: dict, msgs: list[str]) -> str:
         )
         parts.append(CHARTER_COMMON)
     else:
-        parts = [f"You are working GitLab issue {conv['issue_url']}: {conv['issue_title']}."]
+        parts = [
+            f"You are working GitLab issue {conv['issue_url']}: {conv['issue_title']}."
+        ]
         if conv["kind"] == "agent::ready":
-            parts.append("The issue has been labeled `agent::ready`: implement what the issue asks.")
-            issue_iid = conv.get("issue_iid") or conv["issue_url"].rstrip("/").split("/")[-1]
+            parts.append(
+                "The issue has been labeled `agent::ready`: implement what the issue asks."
+            )
+            issue_iid = (
+                conv.get("issue_iid") or conv["issue_url"].rstrip("/").split("/")[-1]
+            )
             parts.append(
                 "If you bypass `glab-board finish` and open a merge request manually, include this "
                 "hidden marker in the MR description: "
@@ -4088,10 +4520,15 @@ def build_launch_prompt(conv: dict, msgs: list[str]) -> str:
                 "issue and report your findings."
             )
         else:
-            parts.append("Answer the following question about this issue:\n\n" + "\n\n".join(msgs))
+            parts.append(
+                "Answer the following question about this issue:\n\n"
+                + "\n\n".join(msgs)
+            )
         if conv["kind"] in TRIGGER_LABELS:
             parts.append(CHARTER_COMMON)
-            parts.append(CHARTER_WORK if conv["kind"] == "agent::ready" else CHARTER_RESEARCH)
+            parts.append(
+                CHARTER_WORK if conv["kind"] == "agent::ready" else CHARTER_RESEARCH
+            )
     ws = workspace_prompt(conv)
     if ws:
         parts.append(ws)
@@ -4187,24 +4624,32 @@ def github_write_status(client: GitHubProject, number, status_name: str) -> None
     if item_id is None:
         content_id = info.get("content_id")
         if not content_id:
-            raise ConfigurationError(f"github issue #{number} not found in {client.repo}")
+            raise ConfigurationError(
+                f"github issue #{number} not found in {client.repo}"
+            )
         item_id = client.add_item(content_id)
         added = True
     if not added:
         live = client.item_status_name(item_id)
         if live == status_name:
             return  # idempotent, no-op
-        if status_name in GITHUB_TERMINAL_STATUSES and live not in GITHUB_ACTIVE_STATUSES:
+        if (
+            status_name in GITHUB_TERMINAL_STATUSES
+            and live not in GITHUB_ACTIVE_STATUSES
+        ):
             log.warning(
                 "github: refusing terminal Status %s for issue #%s — live Status %s is not active "
                 "(newer non-active transition wins)",
-                status_name, number, live,
+                status_name,
+                number,
+                live,
             )
             return
     if not client.set_status_fenced(item_id, status_name):
         log.warning(
             "github: Status %s for issue #%s not confirmed on read-back (workflow/verb race?)",
-            status_name, number,
+            status_name,
+            number,
         )
 
 
@@ -4215,7 +4660,10 @@ def set_issue_labels(gl: GitLab, proj: dict, iid: str, add=(), remove=()):
         # On GitHub the poller's single shadow writer owns every `agent::*` /
         # `triage::*` label. No other path writes lifecycle labels, so this is a
         # deliberate no-op — the shadow reconciles from Status within one tick.
-        log.debug("github: skipping direct label write on issue #%s (shadow owned by poller)", iid)
+        log.debug(
+            "github: skipping direct label write on issue #%s (shadow owned by poller)",
+            iid,
+        )
         return
     params = {}
     if add:
@@ -4236,16 +4684,24 @@ def vault_write_status(proj: dict, conv: dict | None, label: str) -> None:
         return
     abs_path = conv.get("abs_path")
     if not abs_path or not Path(abs_path).exists():
-        log.warning("vault: note for %s missing; cannot write status %s", conv.get("issue_iid"), status)
+        log.warning(
+            "vault: note for %s missing; cannot write status %s",
+            conv.get("issue_iid"),
+            status,
+        )
         return
     board = vault_client(proj)
     if label in (WORKING_LABEL, RESEARCHING_LABEL):
         board.set_status(abs_path, status)  # take ownership; transient, uncommitted
     elif board.set_status_fenced(abs_path, status):
-        board.git_commit(abs_path, f"agent({(conv.get('issue_title') or '')[:60]}): {status}")
+        board.git_commit(
+            abs_path, f"agent({(conv.get('issue_title') or '')[:60]}): {status}"
+        )
 
 
-def set_issue_agent_label(gl: GitLab, proj: dict, iid: str, label: str, conv: dict | None = None) -> None:
+def set_issue_agent_label(
+    gl: GitLab, proj: dict, iid: str, label: str, conv: dict | None = None
+) -> None:
     """Set the sole workflow-state label, including on forges without scopes.
 
     On GitHub the label is a shadow, not the command: this writes the mapped
@@ -4268,7 +4724,11 @@ def set_issue_agent_label(gl: GitLab, proj: dict, iid: str, label: str, conv: di
 
 
 def active_label(conv: dict) -> str:
-    return RESEARCHING_LABEL if conv.get("kind") == "agent::ready-research" else WORKING_LABEL
+    return (
+        RESEARCHING_LABEL
+        if conv.get("kind") == "agent::ready-research"
+        else WORKING_LABEL
+    )
 
 
 def conversation_has_mr(ps: dict, conv_key: str) -> bool:
@@ -4292,7 +4752,9 @@ def post_conversation_note(gl: GitLab, proj: dict, conv: dict, body: str) -> dic
         board = vault_client(proj)
         abs_path = conv.get("abs_path")
         if not abs_path or not Path(abs_path).exists():
-            raise ValueError(f"vault conversation {conv.get('issue_iid')} note path missing: {abs_path}")
+            raise ValueError(
+                f"vault conversation {conv.get('issue_iid')} note path missing: {abs_path}"
+            )
         note = board.append_result_section(abs_path, body)
         if conv.get("session_id"):
             board.write_frontmatter_field(abs_path, "session-id", conv["session_id"])
@@ -4309,7 +4771,9 @@ def post_conversation_note(gl: GitLab, proj: dict, conv: dict, body: str) -> dic
         discussion_id = target.get("discussion_id")
         if not discussion_id:
             try:
-                discussion_id = find_note_discussion_id(gl, proj, "mr", mr_iid, target.get("note_id"))
+                discussion_id = find_note_discussion_id(
+                    gl, proj, "mr", mr_iid, target.get("note_id")
+                )
             except TransientDiscussionLookupError as e:
                 log.warning(
                     "merge request !%s: could not resolve discussion for note %s; posting top-level note: %s",
@@ -4330,7 +4794,9 @@ def post_conversation_note(gl: GitLab, proj: dict, conv: dict, body: str) -> dic
                     discussion_id,
                     e,
                 )
-        return gl.post(f"projects/{proj['id']}/merge_requests/{mr_iid}/notes", body=body)
+        return gl.post(
+            f"projects/{proj['id']}/merge_requests/{mr_iid}/notes", body=body
+        )
 
     iid = str(target.get("issue_iid") or label_issue_iid(conv) or "")
     if not iid:
@@ -4338,7 +4804,9 @@ def post_conversation_note(gl: GitLab, proj: dict, conv: dict, body: str) -> dic
     discussion_id = target.get("discussion_id")
     if not discussion_id:
         try:
-            discussion_id = find_note_discussion_id(gl, proj, "issue", iid, target.get("note_id"))
+            discussion_id = find_note_discussion_id(
+                gl, proj, "issue", iid, target.get("note_id")
+            )
         except TransientDiscussionLookupError as e:
             log.warning(
                 "issue !%s: could not resolve discussion for note %s; posting top-level note: %s",
@@ -4348,7 +4816,10 @@ def post_conversation_note(gl: GitLab, proj: dict, conv: dict, body: str) -> dic
             )
     if discussion_id:
         try:
-            return gl.post(f"projects/{proj['id']}/issues/{iid}/discussions/{discussion_id}/notes", body=body)
+            return gl.post(
+                f"projects/{proj['id']}/issues/{iid}/discussions/{discussion_id}/notes",
+                body=body,
+            )
         except requests.RequestException as e:
             log.warning(
                 "issue !%s: could not reply to discussion %s; posting top-level note: %s",
@@ -4359,18 +4830,19 @@ def post_conversation_note(gl: GitLab, proj: dict, conv: dict, body: str) -> dic
     return gl.post(f"projects/{proj['id']}/issues/{iid}/notes", body=body)
 
 
-def failure_body(failure_class: str, dropped_pending_count: int = 0, *, has_issue: bool = True) -> str:
+def failure_body(
+    failure_class: str, dropped_pending_count: int = 0, *, has_issue: bool = True
+) -> str:
     review_sentence = (
         "This issue has been moved to `agent::failed` for review. "
         "Reply in the agent's thread (or use @agent) to retry."
-        if has_issue else
-        "Reply in the agent's thread (or use @agent) to retry."
+        if has_issue
+        else "Reply in the agent's thread (or use @agent) to retry."
     )
     body = (
         "⚠️ Agent session failed before it could post a final answer.\n\n"
         f"Failure class: `{failure_class}`.\n\n"
-        "No worker output is included here. "
-        + review_sentence
+        "No worker output is included here. " + review_sentence
     )
     if dropped_pending_count:
         body += (
@@ -4387,7 +4859,9 @@ def archive_current_run(conv: dict) -> None:
         conv["last_run"] = dict(conv["current_run"])
 
 
-def mark_failed(gl: GitLab, proj: dict, conv_key: str, conv: dict, failure_class: str) -> None:
+def mark_failed(
+    gl: GitLab, proj: dict, conv_key: str, conv: dict, failure_class: str
+) -> None:
     dropped_pending_count = len(conv.get("pending") or [])
     issue_iid = label_issue_iid(conv)
     conv["status"] = "failed"
@@ -4402,7 +4876,9 @@ def mark_failed(gl: GitLab, proj: dict, conv_key: str, conv: dict, failure_class
             gl,
             proj,
             conv,
-            failure_body(failure_class, dropped_pending_count, has_issue=bool(issue_iid)),
+            failure_body(
+                failure_class, dropped_pending_count, has_issue=bool(issue_iid)
+            ),
         )
         note_id = note["id"]
         conv["last_note_id"] = note_id
@@ -4413,10 +4889,23 @@ def mark_failed(gl: GitLab, proj: dict, conv_key: str, conv: dict, failure_class
             set_issue_agent_label(gl, proj, issue_iid, FAILED_LABEL, conv)
         except requests.RequestException as e:
             log.warning("issue !%s: could not update failure labels: %s", issue_iid, e)
-    log.info("conversation %s: failed (%s) — posted note %s", conv_key, failure_class, note_id)
+    log.info(
+        "conversation %s: failed (%s) — posted note %s",
+        conv_key,
+        failure_class,
+        note_id,
+    )
 
 
-def collect_success(gl: GitLab, proj: dict, ps: dict, conv_key: str, conv: dict, result: dict, state: dict) -> None:
+def collect_success(
+    gl: GitLab,
+    proj: dict,
+    ps: dict,
+    conv_key: str,
+    conv: dict,
+    result: dict,
+    state: dict,
+) -> None:
     run = conv.get("current_run") or {}
     if run.get("reply_target"):
         conv["reply_target"] = run["reply_target"]
@@ -4428,10 +4917,16 @@ def collect_success(gl: GitLab, proj: dict, ps: dict, conv_key: str, conv: dict,
     reply = result.get("reply") or ""
     body, status, had_status = split_status(reply)
     if not had_status:
-        log.warning("conversation %s: reply missing/garbled STATUS line — treating as done", conv_key)
+        log.warning(
+            "conversation %s: reply missing/garbled STATUS line — treating as done",
+            conv_key,
+        )
     if status == "parked" and conv.get("anchor") == "mr":
         status = "done"
-        log.info("conversation %s: MR-anchored parked Q&A treated as done; owner can resume with fresh @agent", conv_key)
+        log.info(
+            "conversation %s: MR-anchored parked Q&A treated as done; owner can resume with fresh @agent",
+            conv_key,
+        )
     if not body.strip():
         body = "(agent produced no reply text)"
     if issue_iid:
@@ -4450,24 +4945,37 @@ def collect_success(gl: GitLab, proj: dict, ps: dict, conv_key: str, conv: dict,
     else:
         conv["status"] = "done"
         conv["parked_note_id"] = None
-        terminal_label = MR_READY_LABEL if conversation_has_mr(ps, conv_key) else FOR_HUMAN_LABEL
+        terminal_label = (
+            MR_READY_LABEL if conversation_has_mr(ps, conv_key) else FOR_HUMAN_LABEL
+        )
     if issue_iid:
         try:
             set_issue_agent_label(gl, proj, issue_iid, terminal_label, conv)
         except requests.RequestException as e:
-            log.warning("issue !%s: posted note %s but could not update labels: %s", issue_iid, note["id"], e)
+            log.warning(
+                "issue !%s: posted note %s but could not update labels: %s",
+                issue_iid,
+                note["id"],
+                e,
+            )
     log.info("conversation %s: %s — posted note %s", conv_key, status, note["id"])
 
 
-def collect_failure(gl: GitLab, proj: dict, conv_key: str, conv: dict, error: dict) -> None:
+def collect_failure(
+    gl: GitLab, proj: dict, conv_key: str, conv: dict, error: dict
+) -> None:
     kind = error.get("kind") or "worker_error"
     message = error.get("message") or ""
-    log.error("worker failed for conversation %s (%s): %s", conv_key, kind, message[-500:])
+    log.error(
+        "worker failed for conversation %s (%s): %s", conv_key, kind, message[-500:]
+    )
     tmux_kill_session((conv.get("current_run") or {}).get("tmux_session"))
     mark_failed(gl, proj, conv_key, conv, kind)
 
 
-def recover_interrupted_launch(gl: GitLab, proj: dict, conv_key: str, conv: dict, run: dict) -> None:
+def recover_interrupted_launch(
+    gl: GitLab, proj: dict, conv_key: str, conv: dict, run: dict
+) -> None:
     messages = run.get("messages") or []
     conv["pending"] = messages + conv.get("pending", [])
     conv["status"] = run.get("previous_status") or "new"
@@ -4478,11 +4986,17 @@ def recover_interrupted_launch(gl: GitLab, proj: dict, conv_key: str, conv: dict
         try:
             set_issue_labels(gl, proj, issue_iid, remove=[active_label(conv)])
         except requests.RequestException as e:
-            log.warning("issue !%s: could not clear interrupted launch label: %s", issue_iid, e)
-    log.warning("conversation %s: recovered interrupted launch; messages requeued", conv_key)
+            log.warning(
+                "issue !%s: could not clear interrupted launch label: %s", issue_iid, e
+            )
+    log.warning(
+        "conversation %s: recovered interrupted launch; messages requeued", conv_key
+    )
 
 
-def synthesize_error(run: dict, kind: str, message: str, exit_code: int | None = None) -> dict:
+def synthesize_error(
+    run: dict, kind: str, message: str, exit_code: int | None = None
+) -> dict:
     error = {
         "ok": False,
         "kind": kind,
@@ -4515,13 +5029,21 @@ def collect_terminal_artifact(
         try:
             result = read_json_file(result_path)
         except (json.JSONDecodeError, OSError) as e:
-            log.warning("issue !%s: corrupt result artifact for run %s: %s", iid, run.get("run_id"), e)
+            log.warning(
+                "issue !%s: corrupt result artifact for run %s: %s",
+                iid,
+                run.get("run_id"),
+                e,
+            )
             collect_failure(
                 gl,
                 proj,
                 iid,
                 conv,
-                {"kind": e.__class__.__name__, "message": f"could not read result.json: {e}"},
+                {
+                    "kind": e.__class__.__name__,
+                    "message": f"could not read result.json: {e}",
+                },
             )
             return True
         collect_success(gl, proj, ps, iid, conv, result, state)
@@ -4530,13 +5052,21 @@ def collect_terminal_artifact(
         try:
             error = read_json_file(error_path)
         except (json.JSONDecodeError, OSError) as e:
-            log.warning("issue !%s: corrupt error artifact for run %s: %s", iid, run.get("run_id"), e)
+            log.warning(
+                "issue !%s: corrupt error artifact for run %s: %s",
+                iid,
+                run.get("run_id"),
+                e,
+            )
             collect_failure(
                 gl,
                 proj,
                 iid,
                 conv,
-                {"kind": e.__class__.__name__, "message": f"could not read error.json: {e}"},
+                {
+                    "kind": e.__class__.__name__,
+                    "message": f"could not read error.json: {e}",
+                },
             )
             return True
         collect_failure(gl, proj, iid, conv, error)
@@ -4556,7 +5086,9 @@ def collect_terminal_artifact_safely(
     try:
         collected = collect_terminal_artifact(gl, proj, ps, state, iid, conv, run)
     except (requests.RequestException, ValueError) as e:
-        log.warning("conversation %s: could not collect run %s: %s", iid, run.get("run_id"), e)
+        log.warning(
+            "conversation %s: could not collect run %s: %s", iid, run.get("run_id"), e
+        )
         return True
     if collected:
         save_state(state)
@@ -4611,7 +5143,13 @@ def collect_and_heal_runs(gl: GitLab, proj: dict, ps: dict, state: dict) -> None
                 tmux_kill_session(run.get("tmux_session"))
             if collect_terminal_artifact_safely(gl, proj, ps, state, iid, conv, run):
                 continue
-            collect_failure(gl, proj, iid, conv, synthesize_error(run, "timeout", "worker deadline exceeded"))
+            collect_failure(
+                gl,
+                proj,
+                iid,
+                conv,
+                synthesize_error(run, "timeout", "worker deadline exceeded"),
+            )
             save_state(state)
             continue
         alive = session_alive if hosted else (bool(pid) and pid_alive(pid))
@@ -4625,12 +5163,20 @@ def collect_and_heal_runs(gl: GitLab, proj: dict, ps: dict, state: dict) -> None
             terminate_process_group(child_pid)
         if collect_terminal_artifact_safely(gl, proj, ps, state, iid, conv, run):
             continue
-        reason = "tmux session ended without result" if hosted else "wrapper pid exited without result"
-        collect_failure(gl, proj, iid, conv, synthesize_error(run, "disappeared", reason))
+        reason = (
+            "tmux session ended without result"
+            if hosted
+            else "wrapper pid exited without result"
+        )
+        collect_failure(
+            gl, proj, iid, conv, synthesize_error(run, "disappeared", reason)
+        )
         save_state(state)
 
 
-def make_run_request(conv: dict, msgs: list[str], is_new: bool, text: str, run_dir: Path, run_id: str) -> dict:
+def make_run_request(
+    conv: dict, msgs: list[str], is_new: bool, text: str, run_dir: Path, run_id: str
+) -> dict:
     request_path = run_dir / "request.json"
     result_path = run_dir / "result.json"
     error_path = run_dir / "error.json"
@@ -4718,7 +5264,12 @@ def start_one(gl: GitLab, proj: dict, ps: dict, conv_key: str, state: dict) -> b
     save_state(state)
     log.info(
         "dispatch: conversation %s %s %s:%s:%s run %s",
-        conv_key, "launch" if is_new else "resume", conv["provider"], conv["model"], conv.get("effort"), run_id,
+        conv_key,
+        "launch" if is_new else "resume",
+        conv["provider"],
+        conv["model"],
+        conv.get("effort"),
+        run_id,
     )
     entrypoint = REPOSITORY_ROOT / "eastwatch"
     worker_argv = [
@@ -4731,24 +5282,34 @@ def start_one(gl: GitLab, proj: dict, ps: dict, conv_key: str, state: dict) -> b
 
     def fail_launch(message: str) -> bool:
         synthesize_error(conv["current_run"], "launch", message)
-        collect_failure(gl, proj, conv_key, conv, read_json_file(conv["current_run"]["error_path"]))
+        collect_failure(
+            gl, proj, conv_key, conv, read_json_file(conv["current_run"]["error_path"])
+        )
         save_state(state)
         return False
 
     session_name = tmux_session_name(conv)
     if tmux_bin() and session_name:
         try:
-            result = tmux_launch_worker(session_name, conv["cwd"], worker_argv, worker_env(conv))
+            result = tmux_launch_worker(
+                session_name, conv["cwd"], worker_argv, worker_env(conv)
+            )
         except (OSError, subprocess.TimeoutExpired) as e:
             return fail_launch(f"tmux launch failed: {e}")
         if result.returncode != 0:
-            return fail_launch(f"tmux new-session exited {result.returncode}: {command_tail(result.stdout, result.stderr)}")
+            return fail_launch(
+                f"tmux new-session exited {result.returncode}: {command_tail(result.stdout, result.stderr)}"
+            )
         # The wrapper writes its own pid to wrapper_pid_path; the heal loop reads it.
         # A live session — not a pid — is the liveness signal for a hosted run.
         conv["current_run"]["tmux_session"] = session_name
         conv["current_run"]["launch_state"] = "working"
         save_state(state)
-        log.info("dispatch: conversation %s hosted in tmux session %s", conv_key, session_name)
+        log.info(
+            "dispatch: conversation %s hosted in tmux session %s",
+            conv_key,
+            session_name,
+        )
         return True
 
     # Fallback: no tmux available — provider output still flows through the
@@ -4890,7 +5451,11 @@ def sweep_artifacts(
         if resolved in active_dirs:
             continue
         run = retained_runs.get(resolved)
-        journal_path = Path(run["journal_path"]) if run and run.get("journal_path") else directory / "run.jsonl"
+        journal_path = (
+            Path(run["journal_path"])
+            if run and run.get("journal_path")
+            else directory / "run.jsonl"
+        )
         if not include_legacy and not journal_path.is_file():
             continue
         try:
@@ -5025,7 +5590,8 @@ def validate_vault_projects(projects: list[dict], *, check_fs: bool = False) -> 
             if proj.get("commit_results", True) and not (resolved / ".git").exists():
                 log.warning(
                     "project %s: commit_results is on but %s is not a git repo — commits will be skipped",
-                    proj.get("path"), vault_path,
+                    proj.get("path"),
+                    vault_path,
                 )
 
 
@@ -5062,7 +5628,9 @@ def github_restore_map(ps: dict) -> dict:
 def apply_project_poll_state(ps: dict, poll_state: dict) -> None:
     ps["last_event_id"] = poll_state.get("last_event_id", ps.get("last_event_id", 0))
     ps["consumed_label_event_ids"] = list(
-        poll_state.get("consumed_label_event_ids", ps.get("consumed_label_event_ids", []))
+        poll_state.get(
+            "consumed_label_event_ids", ps.get("consumed_label_event_ids", [])
+        )
     )
     ps["award_keys"] = list(poll_state.get("award_keys", ps.get("award_keys", [])))
     if "github_observations" in poll_state:
@@ -5116,7 +5684,9 @@ def prepare_project_context(cfg: dict, state: dict, proj: dict) -> dict:
     }
 
 
-def fetch_project_inputs(gl, proj: dict, ps_snapshot: dict, owner: str, triggers: list[str]) -> dict:
+def fetch_project_inputs(
+    gl, proj: dict, ps_snapshot: dict, owner: str, triggers: list[str]
+) -> dict:
     """Fetch remote project inputs against an isolated poll-state snapshot."""
     if project_is_vault(proj):
         return fetch_vault_inputs(gl, proj, ps_snapshot, triggers=triggers)
@@ -5143,8 +5713,12 @@ def commit_project_inputs(cfg: dict, state: dict, ctx: dict, fetched: dict) -> N
     # fetch result — so a crash between observe and dispatch neither loses nor
     # repeats work. Marking consumed happens in the SAME atomic save as the
     # conversation `assemble` creates below.
-    vault_fires = vault_dispatch_fires(staged_ps) if project_is_vault(ctx["proj"]) else []
-    github_fires = github_dispatch_fires(staged_ps) if project_is_github(ctx["proj"]) else []
+    vault_fires = (
+        vault_dispatch_fires(staged_ps) if project_is_vault(ctx["proj"]) else []
+    )
+    github_fires = (
+        github_dispatch_fires(staged_ps) if project_is_github(ctx["proj"]) else []
+    )
     label_fires = vault_fires or github_fires or fetched["label_fires"]
     assemble(
         ctx["gl"],
@@ -5180,7 +5754,11 @@ def configured_project_poll_workers(cfg: dict) -> int | None:
     configured = cfg.get("project_poll_workers")
     if configured is None:
         return None
-    if isinstance(configured, bool) or not isinstance(configured, int) or configured < 1:
+    if (
+        isinstance(configured, bool)
+        or not isinstance(configured, int)
+        or configured < 1
+    ):
         raise ConfigurationError("project_poll_workers must be a positive integer")
     return configured
 
@@ -5206,7 +5784,9 @@ def reconcile_projects(cfg: dict, state: dict) -> list[dict]:
 
     committed_by_index = {}
     workers = project_poll_worker_count(cfg, len(contexts))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers, thread_name_prefix="project-poll") as executor:
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=workers, thread_name_prefix="project-poll"
+    ) as executor:
         future_by_index = {}
         for index, ctx in enumerate(contexts):
             snapshot = project_poll_state_snapshot(ctx["ps"])
@@ -5256,12 +5836,20 @@ def dispatch_pending(cfg: dict, state: dict, contexts: list[dict]) -> None:
             if not conv.get("pending") and conv.get("status") != "new":
                 continue
             if active_total >= cap:
-                log.info("global concurrency cap (%d) reached — deferring conversation %s", cap, conv_key)
+                log.info(
+                    "global concurrency cap (%d) reached — deferring conversation %s",
+                    cap,
+                    conv_key,
+                )
                 return
             try:
                 started = start_one(gl, proj, ps, conv_key, state)
             except Exception:
-                log.exception("dispatch failed for project %s conversation %s", proj.get("path"), conv_key)
+                log.exception(
+                    "dispatch failed for project %s conversation %s",
+                    proj.get("path"),
+                    conv_key,
+                )
                 save_state(state)
                 continue
             if not started:
@@ -5324,7 +5912,11 @@ def validate_jira_projects(cfg: dict) -> list[str]:
 
 def validate_preflight_config(cfg) -> list[str]:
     """Validate parsed config data without performing I/O."""
-    if not isinstance(cfg, dict) or not isinstance(cfg.get("projects"), list) or not cfg["projects"]:
+    if (
+        not isinstance(cfg, dict)
+        or not isinstance(cfg.get("projects"), list)
+        or not cfg["projects"]
+    ):
         return ["config must define at least one project under `projects`"]
 
     projects = cfg["projects"]
@@ -5337,11 +5929,15 @@ def validate_preflight_config(cfg) -> list[str]:
         project_is_valid = True
         for field in ("host", "path"):
             if not isinstance(proj.get(field), str) or not proj[field]:
-                errors.append(f"config projects[{index}] must define non-empty `{field}`")
+                errors.append(
+                    f"config projects[{index}] must define non-empty `{field}`"
+                )
                 project_is_valid = False
         triggers = proj.get("triggers", [])
         if not isinstance(triggers, list):
-            errors.append(f"project {proj.get('path', '?')!r}: `triggers` must be a list")
+            errors.append(
+                f"project {proj.get('path', '?')!r}: `triggers` must be a list"
+            )
             project_is_valid = False
         else:
             unknown = [trigger for trigger in triggers if trigger not in VALID_TRIGGERS]
@@ -5352,7 +5948,11 @@ def validate_preflight_config(cfg) -> list[str]:
                 )
         if project_is_valid:
             valid_projects.append(proj)
-    for validator in (validate_unique_project_keys, validate_github_projects, validate_vault_projects):
+    for validator in (
+        validate_unique_project_keys,
+        validate_github_projects,
+        validate_vault_projects,
+    ):
         try:
             validator(valid_projects)
         except ConfigurationError as e:
@@ -5360,7 +5960,9 @@ def validate_preflight_config(cfg) -> list[str]:
     return errors
 
 
-def validate_preflight_state(state, *, state_path: Path, state_bak_path: Path) -> list[str]:
+def validate_preflight_state(
+    state, *, state_path: Path, state_bak_path: Path
+) -> list[str]:
     """Validate parsed state data without performing I/O."""
     if not isinstance(state, dict):
         return [f"state {state_path} must contain a JSON object"]
@@ -5379,7 +5981,11 @@ def validate_preflight_state(state, *, state_path: Path, state_bak_path: Path) -
 
 def validate_project_key_alignment(cfg, state) -> list[str]:
     """Compare configured project identities with persisted state buckets."""
-    if not isinstance(cfg, dict) or not isinstance(cfg.get("projects"), list) or not cfg["projects"]:
+    if (
+        not isinstance(cfg, dict)
+        or not isinstance(cfg.get("projects"), list)
+        or not cfg["projects"]
+    ):
         return []
     if not isinstance(state, dict) or not isinstance(state.get("projects"), dict):
         return []
@@ -5411,7 +6017,9 @@ def validate_launchd_plist(
 ) -> list[str]:
     """Validate parsed launchd data against explicit expected paths."""
     errors = []
-    placeholders = sorted(set(re.findall(r"__[A-Z][A-Z0-9_]*__", raw.decode(errors="ignore"))))
+    placeholders = sorted(
+        set(re.findall(r"__[A-Z][A-Z0-9_]*__", raw.decode(errors="ignore")))
+    )
     if placeholders:
         errors.append(
             f"launchd plist contains template placeholder(s) {placeholders}; rerun ./install.sh"
@@ -5425,8 +6033,12 @@ def validate_launchd_plist(
         errors.append(
             f"launchd ProgramArguments must point to {expected_executable}; rerun ./install.sh from that repository"
         )
-    if "WorkingDirectory" in plist and plist["WorkingDirectory"] != str(repository_root):
-        errors.append(f"launchd WorkingDirectory must be {repository_root}; rerun ./install.sh")
+    if "WorkingDirectory" in plist and plist["WorkingDirectory"] != str(
+        repository_root
+    ):
+        errors.append(
+            f"launchd WorkingDirectory must be {repository_root}; rerun ./install.sh"
+        )
 
     environment = plist.get("EnvironmentVariables")
     environment = environment if isinstance(environment, dict) else {}
@@ -5495,7 +6107,9 @@ def preflight_errors(
                 )
             )
     else:
-        errors.append(f"state does not exist at {state_path}; run the watcher once or restore its state")
+        errors.append(
+            f"state does not exist at {state_path}; run the watcher once or restore its state"
+        )
     errors.extend(validate_project_key_alignment(cfg, state))
 
     if plist_path.exists():
@@ -5503,7 +6117,9 @@ def preflight_errors(
             raw_plist = plist_path.read_bytes()
             plist = plistlib.loads(raw_plist)
         except (OSError, plistlib.InvalidFileException, ValueError) as e:
-            errors.append(f"could not parse launchd plist {plist_path}: {e}; rerun ./install.sh")
+            errors.append(
+                f"could not parse launchd plist {plist_path}: {e}; rerun ./install.sh"
+            )
         else:
             errors.extend(
                 validate_launchd_plist(
@@ -5515,7 +6131,9 @@ def preflight_errors(
                 )
             )
     else:
-        errors.append(f"launchd plist does not exist at {plist_path}; rerun ./install.sh")
+        errors.append(
+            f"launchd plist does not exist at {plist_path}; rerun ./install.sh"
+        )
     return errors
 
 

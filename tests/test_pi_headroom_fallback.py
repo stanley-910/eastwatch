@@ -23,10 +23,15 @@ def option_from(cmd: list[str], option: str) -> str:
 
 
 def reply_stream(text: str = "finished\nSTATUS: done") -> str:
-    return json.dumps({
-        "type": "message_end",
-        "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
-    })
+    return json.dumps(
+        {
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": text}],
+            },
+        }
+    )
 
 
 class PiHeadroomFallbackTest(unittest.TestCase):
@@ -89,7 +94,10 @@ class PiHeadroomFallbackTest(unittest.TestCase):
         self.assertEqual(provider_from(calls[0]), "headroom-copilot")
         self.assertEqual(option_from(calls[0], "--model"), "gpt-5.3-codex:high")
         self.assertEqual(result["pi_provider"], "headroom-copilot")
-        self.assertIn("[pi-provider] headroom-copilot success", Path(req["stderr_path"]).read_text())
+        self.assertIn(
+            "[pi-provider] headroom-copilot success",
+            Path(req["stderr_path"]).read_text(),
+        )
 
     def test_resumed_gpt_uses_headroom_and_same_session(self):
         req, _ = self.make_req(is_new=False, session_id="existing-session")
@@ -117,10 +125,14 @@ class PiHeadroomFallbackTest(unittest.TestCase):
                     self.create_session_for_command(run_dir, cmd)
                     return 0, reply_stream(), ""
 
-                with mock.patch.object(watcher, "run_pi_provider_command", side_effect=run):
+                with mock.patch.object(
+                    watcher, "run_pi_provider_command", side_effect=run
+                ):
                     result = watcher.run_pi_request(req)
 
-                self.assertEqual([provider_from(cmd) for cmd in calls], ["github-copilot"])
+                self.assertEqual(
+                    [provider_from(cmd) for cmd in calls], ["github-copilot"]
+                )
                 self.assertEqual(result["pi_provider"], "github-copilot")
 
     def test_pre_tool_headroom_failure_retries_original_prompt_directly(self):
@@ -137,9 +149,14 @@ class PiHeadroomFallbackTest(unittest.TestCase):
         with mock.patch.object(watcher, "run_pi_provider_command", side_effect=run):
             result = watcher.run_pi_request(req)
 
-        self.assertEqual([provider_from(cmd) for cmd in calls], ["headroom-copilot", "github-copilot"])
+        self.assertEqual(
+            [provider_from(cmd) for cmd in calls],
+            ["headroom-copilot", "github-copilot"],
+        )
         self.assertEqual(calls[1][-1], req["text"])
-        self.assertNotEqual(option_from(calls[0], "--session-id"), option_from(calls[1], "--session-id"))
+        self.assertNotEqual(
+            option_from(calls[0], "--session-id"), option_from(calls[1], "--session-id")
+        )
         self.assertEqual(result["pi_provider"], "github-copilot")
         self.assertIn("retry original prompt", Path(req["stderr_path"]).read_text())
 
@@ -174,7 +191,9 @@ class PiHeadroomFallbackTest(unittest.TestCase):
             calls.append(cmd)
             if provider_from(cmd) == "headroom-copilot":
                 recovered = self.create_session_for_command(run_dir, cmd)
-                tool_event = json.dumps({"type": "tool_execution_start", "toolName": "bash"})
+                tool_event = json.dumps(
+                    {"type": "tool_execution_start", "toolName": "bash"}
+                )
                 return 1, tool_event, "proxy failed"
             return 0, reply_stream(), ""
 
@@ -196,7 +215,9 @@ class PiHeadroomFallbackTest(unittest.TestCase):
             return 1, tool_event, "headroom failed after tool"
 
         with mock.patch.object(watcher, "run_pi_provider_command", side_effect=run):
-            with self.assertRaisesRegex(watcher.WorkerCommandError, "direct replay blocked"):
+            with self.assertRaisesRegex(
+                watcher.WorkerCommandError, "direct replay blocked"
+            ):
                 watcher.run_pi_request(req)
 
         self.assertEqual([provider_from(cmd) for cmd in calls], ["headroom-copilot"])
@@ -211,7 +232,9 @@ class PiHeadroomFallbackTest(unittest.TestCase):
             return 1, "not-json\n", "headroom failed"
 
         with mock.patch.object(watcher, "run_pi_provider_command", side_effect=run):
-            with self.assertRaisesRegex(watcher.WorkerCommandError, "tool activity uncertain"):
+            with self.assertRaisesRegex(
+                watcher.WorkerCommandError, "tool activity uncertain"
+            ):
                 watcher.run_pi_request(req)
 
         self.assertEqual([provider_from(cmd) for cmd in calls], ["headroom-copilot"])
@@ -226,12 +249,22 @@ class PiHeadroomFallbackTest(unittest.TestCase):
             if provider_from(cmd) == "headroom-copilot":
                 return (
                     1,
-                    json.dumps({"type": "provider_error", "message": "HEADROOM_PROVIDER_ERROR: proxy refused"}),
+                    json.dumps(
+                        {
+                            "type": "provider_error",
+                            "message": "HEADROOM_PROVIDER_ERROR: proxy refused",
+                        }
+                    ),
                     "headroom startup warning",
                 )
             return (
                 2,
-                json.dumps({"type": "provider_error", "message": "DIRECT_PROVIDER_ERROR: quota exhausted"}),
+                json.dumps(
+                    {
+                        "type": "provider_error",
+                        "message": "DIRECT_PROVIDER_ERROR: quota exhausted",
+                    }
+                ),
                 "direct startup warning",
             )
 
@@ -240,7 +273,10 @@ class PiHeadroomFallbackTest(unittest.TestCase):
             exit_code = watcher.worker_main(req["request_path"])
 
         self.assertEqual(exit_code, 1)
-        self.assertEqual([provider_from(cmd) for cmd in calls], ["headroom-copilot", "github-copilot"])
+        self.assertEqual(
+            [provider_from(cmd) for cmd in calls],
+            ["headroom-copilot", "github-copilot"],
+        )
         error = json.loads(Path(req["error_path"]).read_text())
         self.assertIn("DIRECT_PROVIDER_ERROR: quota exhausted", error["message"])
         self.assertIn("direct startup warning", error["message"])

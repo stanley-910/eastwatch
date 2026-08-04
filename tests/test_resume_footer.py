@@ -17,7 +17,9 @@ class ResumeFooterTest(unittest.TestCase):
         body = watcher.failure_body("exit")
 
         self.assertIn("Reply in the agent's thread (or use @agent) to retry.", body)
-        self.assertNotIn("A fresh owner comment on this issue will retry the session", body)
+        self.assertNotIn(
+            "A fresh owner comment on this issue will retry the session", body
+        )
 
     def test_pi_footer_shows_model_and_home_relative_resume_command(self):
         session_file = Path.home() / ".local/state/eastwatch/convos/issue/session.jsonl"

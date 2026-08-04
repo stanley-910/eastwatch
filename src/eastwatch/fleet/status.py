@@ -14,6 +14,7 @@ disambiguates a working run from a crashed one. `derived` is computed here and
 never stored — a quiet stdout artifact looks the same whether the worker is
 thinking or dead, so liveness has to be joined in at read time.
 """
+
 from __future__ import annotations
 
 import json
@@ -56,7 +57,11 @@ def live_tmux_sessions() -> set[str]:
     try:
         result = subprocess.run(
             [tb, "list-sessions", "-F", "#{session_name}"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5, check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return set()
@@ -181,7 +186,9 @@ def journal_status(path: str | None) -> tuple[str, str]:
                     continue
                 if not isinstance(fact, dict) or fact.get("v") != 1:
                     continue
-                if fact.get("type") == "session_discovered" and fact.get("session_file"):
+                if fact.get("type") == "session_discovered" and fact.get(
+                    "session_file"
+                ):
                     session_file = str(fact["session_file"])
                 rendered = summarize_fact(fact)
                 if rendered:
@@ -208,7 +215,11 @@ def summarize_line(line: str) -> str | None:
     # claude stream-json events
     if etype == "assistant":
         for block in (ev.get("message") or {}).get("content", []):
-            if isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "text"
+                and block.get("text")
+            ):
                 return "assistant: " + block["text"].strip().replace("\n", " ")[:180]
             if isinstance(block, dict) and block.get("type") == "tool_use":
                 return "tool: " + str(block.get("name", "?"))
@@ -231,14 +242,24 @@ def summarize_line(line: str) -> str | None:
     if etype == "tool_execution_start":
         name = ev.get("toolName") or "?"
         args = ev.get("args") if isinstance(ev.get("args"), dict) else {}
-        detail = (args.get("command") or args.get("file_path") or args.get("path")
-                  or args.get("file") or args.get("pattern") or args.get("query") or "")
+        detail = (
+            args.get("command")
+            or args.get("file_path")
+            or args.get("path")
+            or args.get("file")
+            or args.get("pattern")
+            or args.get("query")
+            or ""
+        )
         return f"tool: {name} {str(detail).replace(chr(10), ' ')[:120]}".rstrip()
     if etype == "message_end":
         msg = ev.get("message") or {}
         if msg.get("role") == "assistant":
-            texts = [b.get("text", "") for b in (msg.get("content") or [])
-                     if isinstance(b, dict) and b.get("type") == "text"]
+            texts = [
+                b.get("text", "")
+                for b in (msg.get("content") or [])
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
             if texts:
                 return "assistant: " + "".join(texts).strip().replace("\n", " ")[:180]
         return None
@@ -361,31 +382,33 @@ def build_rows() -> list[dict]:
             legacy_stream = observed_run.get("stream_path") or ""
             pi_session = conv.get("session_file") or discovered_session or ""
             preview_path = pi_session if conv.get("provider") == "pi" else legacy_stream
-            rows.append({
-                "identity": f"{project_key}:{conv_key}",
-                "key": name or "task-?",
-                "surface": "gitlab",
-                "status": conv.get("status") or "unknown",
-                "derived": derived,
-                "model": model_label(conv),
-                "provider": conv.get("provider") or "",
-                "model_id": conv.get("model") or "",
-                "effort": conv.get("effort") or "",
-                "session": resume_handle(conv) or pi_session,
-                "tmux_alive": tmux_alive,
-                "log": preview_path,
-                "journal": journal_path,
-                "last_line": journal_line or tail_last_line(legacy_stream),
-                "url": conv.get("issue_url") or conv.get("mr_url") or "",
-                "cwd": conv.get("cwd") or "",
-                "started_at": observed_run.get("started_at"),
-                "finished_at": (
-                    run_completed_at(observed_run)
-                    if derived == "finished"
-                    else None
-                ),
-                "run_id": observed_run.get("run_id") or "",
-            })
+            rows.append(
+                {
+                    "identity": f"{project_key}:{conv_key}",
+                    "key": name or "task-?",
+                    "surface": "gitlab",
+                    "status": conv.get("status") or "unknown",
+                    "derived": derived,
+                    "model": model_label(conv),
+                    "provider": conv.get("provider") or "",
+                    "model_id": conv.get("model") or "",
+                    "effort": conv.get("effort") or "",
+                    "session": resume_handle(conv) or pi_session,
+                    "tmux_alive": tmux_alive,
+                    "log": preview_path,
+                    "journal": journal_path,
+                    "last_line": journal_line or tail_last_line(legacy_stream),
+                    "url": conv.get("issue_url") or conv.get("mr_url") or "",
+                    "cwd": conv.get("cwd") or "",
+                    "started_at": observed_run.get("started_at"),
+                    "finished_at": (
+                        run_completed_at(observed_run)
+                        if derived == "finished"
+                        else None
+                    ),
+                    "run_id": observed_run.get("run_id") or "",
+                }
+            )
     # Running first, then parked; stable within group.
     order = {
         "working": 0,

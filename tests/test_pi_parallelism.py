@@ -35,7 +35,9 @@ class PiParallelismTest(unittest.TestCase):
 
     def test_pi_prompt_arg_neutralizes_leading_at_file_token(self):
         self.assertEqual(watcher.pi_prompt_arg("@agent retry"), " @agent retry")
-        self.assertEqual(watcher.pi_prompt_arg("quoted @agent retry"), "quoted @agent retry")
+        self.assertEqual(
+            watcher.pi_prompt_arg("quoted @agent retry"), "quoted @agent retry"
+        )
 
     def test_prepare_issue_workspace_uses_forge_result_as_worker_cwd(self):
         checkout = TMP_ROOT / "forge-checkout"
@@ -115,10 +117,14 @@ class PiParallelismTest(unittest.TestCase):
         self.assertIn(watcher.CHARTER_COMMON, prompt)
         self.assertIn(watcher.CHARTER_WORK, prompt)
         self.assertNotIn(watcher.CHARTER_RESEARCH, prompt)
-        self.assertLess(prompt.index("source_issue_iid=103"), prompt.index(watcher.CHARTER_COMMON))
+        self.assertLess(
+            prompt.index("source_issue_iid=103"), prompt.index(watcher.CHARTER_COMMON)
+        )
 
     def test_research_launch_prompt_includes_common_and_research_charters(self):
-        prompt = watcher.build_launch_prompt(self.make_issue_conv("agent::ready-research"), [])
+        prompt = watcher.build_launch_prompt(
+            self.make_issue_conv("agent::ready-research"), []
+        )
 
         self.assertIn(watcher.CHARTER_COMMON, prompt)
         self.assertIn(watcher.CHARTER_RESEARCH, prompt)
@@ -133,20 +139,26 @@ class PiParallelismTest(unittest.TestCase):
             "mr_title": "Player card",
             "checkout": None,
         }
-        prompt = watcher.build_launch_prompt(conv, ["Does this handle missing avatars?"])
+        prompt = watcher.build_launch_prompt(
+            conv, ["Does this handle missing avatars?"]
+        )
 
         self.assertNotIn(watcher.CHARTER_COMMON, prompt)
         self.assertNotIn(watcher.CHARTER_WORK, prompt)
         self.assertNotIn(watcher.CHARTER_RESEARCH, prompt)
 
     def test_qa_launch_prompt_excludes_autonomy_charters(self):
-        prompt = watcher.build_launch_prompt(self.make_issue_conv("qa"), ["What changed?"])
+        prompt = watcher.build_launch_prompt(
+            self.make_issue_conv("qa"), ["What changed?"]
+        )
 
         self.assertNotIn(watcher.CHARTER_COMMON, prompt)
         self.assertNotIn(watcher.CHARTER_WORK, prompt)
         self.assertNotIn(watcher.CHARTER_RESEARCH, prompt)
 
-    def make_req(self, run_dir: Path, *, is_new: bool = True, sid: str | None = None) -> dict:
+    def make_req(
+        self, run_dir: Path, *, is_new: bool = True, sid: str | None = None
+    ) -> dict:
         run_dir.mkdir(parents=True, exist_ok=True)
         req = {
             "cwd": str(run_dir),
@@ -225,7 +237,9 @@ class PiParallelismTest(unittest.TestCase):
         with (
             mock.patch.object(watcher, "set_issue_labels") as set_issue_labels,
             mock.patch.object(watcher, "save_state"),
-            mock.patch.object(watcher, "tmux_bin", return_value="/opt/homebrew/bin/tmux"),
+            mock.patch.object(
+                watcher, "tmux_bin", return_value="/opt/homebrew/bin/tmux"
+            ),
             mock.patch.object(watcher, "tmux_launch_worker", return_value=completed),
         ):
             self.assertTrue(watcher.start_one(gl, project, ps, "42", state))
@@ -235,7 +249,11 @@ class PiParallelismTest(unittest.TestCase):
             project,
             "42",
             add=[watcher.WORKING_LABEL],
-            remove=[label for label in watcher.SHADOW_LABELS if label != watcher.WORKING_LABEL],
+            remove=[
+                label
+                for label in watcher.SHADOW_LABELS
+                if label != watcher.WORKING_LABEL
+            ],
         )
 
     def test_project_polling_fetches_projects_in_parallel_and_commits_serially(self):
@@ -244,8 +262,18 @@ class PiParallelismTest(unittest.TestCase):
             "owner": "stanwang",
             "defaults": {},
             "projects": [
-                {"host": "gitlab.example.com", "path": "group/one", "id": 1, "triggers": []},
-                {"host": "gitlab.example.com", "path": "group/two", "id": 2, "triggers": []},
+                {
+                    "host": "gitlab.example.com",
+                    "path": "group/one",
+                    "id": 1,
+                    "triggers": [],
+                },
+                {
+                    "host": "gitlab.example.com",
+                    "path": "group/two",
+                    "id": 2,
+                    "triggers": [],
+                },
             ],
         }
         state = {"projects": {}}
@@ -299,10 +327,13 @@ class PiParallelismTest(unittest.TestCase):
             for name, value in originals.items():
                 setattr(watcher, name, value)
 
-        self.assertEqual([ctx["key"] for ctx in contexts], [
-            "gitlab.example.com/group/one",
-            "gitlab.example.com/group/two",
-        ])
+        self.assertEqual(
+            [ctx["key"] for ctx in contexts],
+            [
+                "gitlab.example.com/group/one",
+                "gitlab.example.com/group/two",
+            ],
+        )
         self.assertCountEqual(started, ["group/one", "group/two"])
         self.assertCountEqual(parallel_observed, ["group/one", "group/two"])
         self.assertCountEqual(commit_order, ["group/one", "group/two"])
@@ -314,8 +345,18 @@ class PiParallelismTest(unittest.TestCase):
             "owner": "stanwang",
             "defaults": {},
             "projects": [
-                {"host": "gitlab.example.com", "path": "group/slow", "id": 1, "triggers": []},
-                {"host": "gitlab.example.com", "path": "group/fast", "id": 2, "triggers": []},
+                {
+                    "host": "gitlab.example.com",
+                    "path": "group/slow",
+                    "id": 1,
+                    "triggers": [],
+                },
+                {
+                    "host": "gitlab.example.com",
+                    "path": "group/fast",
+                    "id": 2,
+                    "triggers": [],
+                },
             ],
         }
         state = {"projects": {}}
@@ -389,11 +430,17 @@ class PiParallelismTest(unittest.TestCase):
                     watcher.ConfigurationError,
                     "project_poll_workers must be a positive integer",
                 ):
-                    watcher.configured_project_poll_workers({"project_poll_workers": value})
+                    watcher.configured_project_poll_workers(
+                        {"project_poll_workers": value}
+                    )
 
         self.assertIsNone(watcher.configured_project_poll_workers({}))
-        self.assertEqual(watcher.project_poll_worker_count({"project_poll_workers": 2}, 4), 2)
-        self.assertEqual(watcher.project_poll_worker_count({"project_poll_workers": 8}, 4), 4)
+        self.assertEqual(
+            watcher.project_poll_worker_count({"project_poll_workers": 2}, 4), 2
+        )
+        self.assertEqual(
+            watcher.project_poll_worker_count({"project_poll_workers": 8}, 4), 4
+        )
 
     def test_failed_assembly_does_not_advance_live_poll_state(self):
         cfg = {
@@ -401,7 +448,12 @@ class PiParallelismTest(unittest.TestCase):
             "owner": "stanwang",
             "defaults": {},
             "projects": [
-                {"host": "gitlab.example.com", "path": "group/one", "id": 1, "triggers": []},
+                {
+                    "host": "gitlab.example.com",
+                    "path": "group/one",
+                    "id": 1,
+                    "triggers": [],
+                },
             ],
         }
         state = {"projects": {}}
@@ -499,10 +551,14 @@ class PiParallelismTest(unittest.TestCase):
         deadline = time.time() + 2
         while not first_started.exists() and time.time() < deadline:
             time.sleep(0.02)
-        self.assertTrue(first_started.exists(), "recovered-session child did not launch")
+        self.assertTrue(
+            first_started.exists(), "recovered-session child did not launch"
+        )
 
         started = time.time()
-        code, stdout, stderr = watcher.run_pi_provider_command(second_req, second_cmd, 5, "second-session")
+        code, stdout, stderr = watcher.run_pi_provider_command(
+            second_req, second_cmd, 5, "second-session"
+        )
         elapsed = time.time() - started
         thread.join(timeout=3)
 
@@ -554,7 +610,9 @@ class PiParallelismTest(unittest.TestCase):
         self.assertTrue(first_started.exists(), "first child did not launch")
 
         started = time.time()
-        code, stdout, stderr = watcher.run_pi_provider_command(second_req, second_cmd, 5, "second-session")
+        code, stdout, stderr = watcher.run_pi_provider_command(
+            second_req, second_cmd, 5, "second-session"
+        )
         elapsed = time.time() - started
         thread.join(timeout=3)
 

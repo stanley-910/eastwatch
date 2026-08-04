@@ -102,7 +102,9 @@ class JiraEntrypointTest(unittest.TestCase):
 
     def test_custom_jira_fields_are_forwarded_to_helper(self):
         completed = SimpleNamespace(returncode=0, stdout="Jira details", stderr="")
-        with mock.patch.object(watcher.subprocess, "run", return_value=completed) as run:
+        with mock.patch.object(
+            watcher.subprocess, "run", return_value=completed
+        ) as run:
             watcher.fetch_jira_context(
                 {},
                 {"title": "Investigate PROJ-123", "description": ""},

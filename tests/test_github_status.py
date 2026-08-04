@@ -36,7 +36,16 @@ def gh_proj(client):
     }
 
 
-def item(item_id, number, status_name, updated_at, *, content_id=None, title="t", state="OPEN"):
+def item(
+    item_id,
+    number,
+    status_name,
+    updated_at,
+    *,
+    content_id=None,
+    title="t",
+    state="OPEN",
+):
     option = f"opt-{status_name}" if status_name else None
     return {
         "item_id": item_id,
@@ -65,7 +74,9 @@ class FakeGitHub:
         self.hydrated: list[int] = []
         self._issue_items: dict[int, dict] = {}
         self._issue_labels: dict[int, list[str]] = {}
-        self._live: dict[str, str | None] = {i["item_id"]: i["status_name"] for i in self._items}
+        self._live: dict[str, str | None] = {
+            i["item_id"]: i["status_name"] for i in self._items
+        }
 
     def load_status_schema(self):
         pass
@@ -78,7 +89,11 @@ class FakeGitHub:
 
     def hydrate_issue(self, number):
         self.hydrated.append(int(number))
-        return {"title": "t", "url": f"https://github.com/owner/repo/issues/{number}", "body": "body"}
+        return {
+            "title": "t",
+            "url": f"https://github.com/owner/repo/issues/{number}",
+            "body": "body",
+        }
 
     def item_status_name(self, item_id):
         if item_id in self._live:
@@ -100,7 +115,10 @@ class FakeGitHub:
 
     def issue_item(self, number):
         return dict(
-            self._issue_items.get(int(number), {"item_id": None, "content_id": f"I_{number}", "state": "OPEN"})
+            self._issue_items.get(
+                int(number),
+                {"item_id": None, "content_id": f"I_{number}", "state": "OPEN"},
+            )
         )
 
     def add_item(self, content_id):
@@ -136,7 +154,9 @@ class PollerTest(unittest.TestCase):
     def test_adopt_only_bootstrap(self):
         client = FakeGitHub()
         ps = fresh_ps(bootstrapped=False)
-        diff = watcher.poll_github_status(client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")])
+        diff = watcher.poll_github_status(
+            client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")]
+        )
         self.assertEqual(ps["github_outbox"], {})  # no dispatch on bootstrap
         self.assertIn("PI_1", ps["github_observations"])
         self.assertEqual(diff["changed"], [])  # no shadow on bootstrap
@@ -144,7 +164,9 @@ class PollerTest(unittest.TestCase):
     def test_no_dispatch_on_first_sighting_already_ready(self):
         client = FakeGitHub()
         ps = fresh_ps()  # bootstrapped, but this item never seen before
-        watcher.poll_github_status(client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")])
+        watcher.poll_github_status(
+            client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")]
+        )
         self.assertEqual(ps["github_outbox"], {})
         self.assertIn("PI_1", ps["github_observations"])
 
@@ -152,11 +174,21 @@ class PollerTest(unittest.TestCase):
         client = FakeGitHub()
         ps = fresh_ps(
             github_observations={
-                "PI_1": {"generation": watcher.github_generation(PROJECT_ID, item("PI_1", 7, "Triage", "t0")),
-                         "status_name": "Triage", "number": 7, "content_id": "I_7", "updated_at": "t0", "option_id": "opt-Triage"}
+                "PI_1": {
+                    "generation": watcher.github_generation(
+                        PROJECT_ID, item("PI_1", 7, "Triage", "t0")
+                    ),
+                    "status_name": "Triage",
+                    "number": 7,
+                    "content_id": "I_7",
+                    "updated_at": "t0",
+                    "option_id": "opt-Triage",
+                }
             }
         )
-        diff = watcher.poll_github_status(client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")])
+        diff = watcher.poll_github_status(
+            client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")]
+        )
         self.assertEqual(len(ps["github_outbox"]), 1)
         entry = next(iter(ps["github_outbox"].values()))
         self.assertEqual(entry["label"], watcher.TRIGGER_LABELS[0])
@@ -168,11 +200,19 @@ class PollerTest(unittest.TestCase):
         client = FakeGitHub()
         ps = fresh_ps(
             github_observations={
-                "PI_1": {"generation": "old", "status_name": "Needs-info", "number": 7,
-                         "content_id": "I_7", "updated_at": "t0", "option_id": "opt-Needs-info"}
+                "PI_1": {
+                    "generation": "old",
+                    "status_name": "Needs-info",
+                    "number": 7,
+                    "content_id": "I_7",
+                    "updated_at": "t0",
+                    "option_id": "opt-Needs-info",
+                }
             }
         )
-        watcher.poll_github_status(client, gh_proj(client), ps, [item("PI_1", 7, "Ready-research", "t1")])
+        watcher.poll_github_status(
+            client, gh_proj(client), ps, [item("PI_1", 7, "Ready-research", "t1")]
+        )
         entry = next(iter(ps["github_outbox"].values()))
         self.assertEqual(entry["label"], watcher.TRIGGER_LABELS[1])
 
@@ -182,11 +222,19 @@ class PollerTest(unittest.TestCase):
         client = FakeGitHub()
         ps = fresh_ps(
             github_observations={
-                "PI_1": {"generation": "old", "status_name": "Triage", "number": 7,
-                         "content_id": "I_7", "updated_at": "t0", "option_id": "opt-Triage"}
+                "PI_1": {
+                    "generation": "old",
+                    "status_name": "Triage",
+                    "number": 7,
+                    "content_id": "I_7",
+                    "updated_at": "t0",
+                    "option_id": "opt-Triage",
+                }
             }
         )
-        diff = watcher.poll_github_status(client, gh_proj(client), ps, [item("PI_1", 7, "Working", "t2")])
+        diff = watcher.poll_github_status(
+            client, gh_proj(client), ps, [item("PI_1", 7, "Working", "t2")]
+        )
         self.assertEqual(ps["github_outbox"], {})  # final state Working != Ready
         self.assertEqual(ps["github_observations"]["PI_1"]["status_name"], "Working")
         self.assertIn("PI_1", diff["changed"])
@@ -196,16 +244,32 @@ class PollerTest(unittest.TestCase):
         client = FakeGitHub()
         ps = fresh_ps(
             github_observations={
-                "PI_1": {"generation": "old", "status_name": "Parked", "number": 7,
-                         "content_id": "I_7", "updated_at": "t0", "option_id": "opt-Parked"}
+                "PI_1": {
+                    "generation": "old",
+                    "status_name": "Parked",
+                    "number": 7,
+                    "content_id": "I_7",
+                    "updated_at": "t0",
+                    "option_id": "opt-Parked",
+                }
             }
         )
-        watcher.poll_github_status(client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")])
+        watcher.poll_github_status(
+            client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")]
+        )
         self.assertEqual(ps["github_outbox"], {})
 
     def _triage_obs(self):
-        return {"PI_1": {"generation": "old", "status_name": "Triage", "number": 7,
-                         "content_id": "I_7", "updated_at": "t0", "option_id": "opt-Triage"}}
+        return {
+            "PI_1": {
+                "generation": "old",
+                "status_name": "Triage",
+                "number": 7,
+                "content_id": "I_7",
+                "updated_at": "t0",
+                "option_id": "opt-Triage",
+            }
+        }
 
     def test_trigger_gating_blocks_disabled_kind(self):
         # Q1: project enables only agent::ready; a Ready-research transition must
@@ -213,7 +277,10 @@ class PollerTest(unittest.TestCase):
         client = FakeGitHub()
         ps = fresh_ps(github_observations=self._triage_obs())
         watcher.poll_github_status(
-            client, gh_proj(client), ps, [item("PI_1", 7, "Ready-research", "t1")],
+            client,
+            gh_proj(client),
+            ps,
+            [item("PI_1", 7, "Ready-research", "t1")],
             triggers=["agent::ready"],
         )
         self.assertEqual(ps["github_outbox"], {})
@@ -222,7 +289,10 @@ class PollerTest(unittest.TestCase):
         client = FakeGitHub()
         ps = fresh_ps(github_observations=self._triage_obs())
         watcher.poll_github_status(
-            client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")],
+            client,
+            gh_proj(client),
+            ps,
+            [item("PI_1", 7, "Ready", "t1")],
             triggers=["agent::ready", "mention"],
         )
         self.assertEqual(len(ps["github_outbox"]), 1)
@@ -231,10 +301,14 @@ class PollerTest(unittest.TestCase):
         # Q6: issue title/url/body are fetched only when a dispatch fires.
         client = FakeGitHub()
         ps = fresh_ps(github_observations=self._triage_obs())
-        watcher.poll_github_status(client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")])
+        watcher.poll_github_status(
+            client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")]
+        )
         self.assertEqual(client.hydrated, [7])
         entry = next(iter(ps["github_outbox"].values()))
-        self.assertEqual(entry["issue"]["web_url"], "https://github.com/owner/repo/issues/7")
+        self.assertEqual(
+            entry["issue"]["web_url"], "https://github.com/owner/repo/issues/7"
+        )
 
 
 class FetchInputsTest(unittest.TestCase):
@@ -251,8 +325,14 @@ class FetchInputsTest(unittest.TestCase):
         client = FakeGitHub(items=[item("PI_1", 7, "Ready", "t1")])
         ps = fresh_ps(
             github_observations={
-                "PI_1": {"generation": "old", "status_name": "Triage", "number": 7,
-                         "content_id": "I_7", "updated_at": "t0", "option_id": "opt-Triage"}
+                "PI_1": {
+                    "generation": "old",
+                    "status_name": "Triage",
+                    "number": 7,
+                    "content_id": "I_7",
+                    "updated_at": "t0",
+                    "option_id": "opt-Triage",
+                }
             }
         )
         watcher.fetch_github_inputs(client, gh_proj(client), ps)
@@ -269,14 +349,22 @@ class FetchInputsTest(unittest.TestCase):
 
 class OutboxTest(unittest.TestCase):
     def _fire_once(self, ps, client):
-        watcher.poll_github_status(client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")])
+        watcher.poll_github_status(
+            client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")]
+        )
 
     def test_crash_replay_is_idempotent(self):
         client = FakeGitHub()
         ps = fresh_ps(
             github_observations={
-                "PI_1": {"generation": "old", "status_name": "Triage", "number": 7,
-                         "content_id": "I_7", "updated_at": "t0", "option_id": "opt-Triage"}
+                "PI_1": {
+                    "generation": "old",
+                    "status_name": "Triage",
+                    "number": 7,
+                    "content_id": "I_7",
+                    "updated_at": "t0",
+                    "option_id": "opt-Triage",
+                }
             }
         )
         self._fire_once(ps, client)
@@ -295,7 +383,9 @@ class OutboxTest(unittest.TestCase):
         self.assertEqual(watcher.github_dispatch_fires(ps), [])
 
         # Re-polling the unchanged item adds no new command.
-        watcher.poll_github_status(client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")])
+        watcher.poll_github_status(
+            client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")]
+        )
         self.assertEqual(list(ps["github_outbox"]), [gen])
         self.assertEqual(watcher.github_dispatch_fires(ps), [])
 
@@ -303,16 +393,26 @@ class OutboxTest(unittest.TestCase):
         client = FakeGitHub()
         ps = fresh_ps(
             github_observations={
-                "PI_1": {"generation": "old", "status_name": "Failed", "number": 7,
-                         "content_id": "I_7", "updated_at": "t0", "option_id": "opt-Failed"}
+                "PI_1": {
+                    "generation": "old",
+                    "status_name": "Failed",
+                    "number": 7,
+                    "content_id": "I_7",
+                    "updated_at": "t0",
+                    "option_id": "opt-Failed",
+                }
             }
         )
         # Failed -> Ready fires; later Failed -> Ready again (new updatedAt) fires anew.
-        watcher.poll_github_status(client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")])
+        watcher.poll_github_status(
+            client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t1")]
+        )
         watcher.github_mark_dispatched(ps, watcher.github_dispatch_fires(ps))
         ps["github_observations"]["PI_1"]["status_name"] = "Failed"
         ps["github_observations"]["PI_1"]["generation"] = "old2"
-        watcher.poll_github_status(client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t9")])
+        watcher.poll_github_status(
+            client, gh_proj(client), ps, [item("PI_1", 7, "Ready", "t9")]
+        )
         undispatched = [e for e in ps["github_outbox"].values() if not e["dispatched"]]
         self.assertEqual(len(undispatched), 1)
 
@@ -323,19 +423,25 @@ class OutboxTest(unittest.TestCase):
 class ShadowTest(unittest.TestCase):
     def test_full_replacement_of_shadow_labels(self):
         client = FakeGitHub(items=[item("PI_1", 7, "Working", "t1")])
-        ps = fresh_ps(github_observations={"PI_1": {"number": 7, "status_name": "Working"}})
+        ps = fresh_ps(
+            github_observations={"PI_1": {"number": 7, "status_name": "Working"}}
+        )
         watcher.github_shadow_write(client, gh_proj(client), ps, ["PI_1"])
         self.assertEqual(len(client.label_calls), 1)
         number, add, remove = client.label_calls[0]
         self.assertEqual(number, 7)
         self.assertEqual(add, [watcher.WORKING_LABEL])
-        self.assertEqual(set(remove), set(watcher.SHADOW_LABELS) - {watcher.WORKING_LABEL})
+        self.assertEqual(
+            set(remove), set(watcher.SHADOW_LABELS) - {watcher.WORKING_LABEL}
+        )
         self.assertEqual(len(remove), 9)
 
     def test_prewrite_recheck_skips_when_status_moved(self):
         # Observation said Working, but live Status is already Review -> skip.
         client = FakeGitHub(items=[item("PI_1", 7, "Review", "t2")])
-        ps = fresh_ps(github_observations={"PI_1": {"number": 7, "status_name": "Working"}})
+        ps = fresh_ps(
+            github_observations={"PI_1": {"number": 7, "status_name": "Working"}}
+        )
         watcher.github_shadow_write(client, gh_proj(client), ps, ["PI_1"])
         self.assertEqual(client.label_calls, [])
 
@@ -353,7 +459,9 @@ class PruneTest(unittest.TestCase):
     def test_reads_conversation_status_first(self):
         client = FakeGitHub()  # issue #7 no longer in the project
         ps = fresh_ps(
-            github_observations={"PI_old": {"number": 7, "content_id": "I_7", "status_name": "Working"}},
+            github_observations={
+                "PI_old": {"number": 7, "content_id": "I_7", "status_name": "Working"}
+            },
             github_restore={"7": "Working"},
         )
         watcher.github_prune_recovery(client, gh_proj(client), ps, present=set())
@@ -366,7 +474,9 @@ class PruneTest(unittest.TestCase):
         client = FakeGitHub()
         client._issue_labels[7] = ["agent::parked", "category::feature"]
         ps = fresh_ps(
-            github_observations={"PI_old": {"number": 7, "content_id": "I_7", "status_name": "Parked"}},
+            github_observations={
+                "PI_old": {"number": 7, "content_id": "I_7", "status_name": "Parked"}
+            },
         )
         watcher.github_prune_recovery(client, gh_proj(client), ps, present=set())
         self.assertEqual(client.status_calls, [("item-for-I_7", "Parked")])
@@ -374,14 +484,20 @@ class PruneTest(unittest.TestCase):
     def test_defaults_to_triage_when_nothing_known(self):
         client = FakeGitHub()
         ps = fresh_ps(
-            github_observations={"PI_old": {"number": 7, "content_id": "I_7", "status_name": "Ready"}},
+            github_observations={
+                "PI_old": {"number": 7, "content_id": "I_7", "status_name": "Ready"}
+            },
         )
         watcher.github_prune_recovery(client, gh_proj(client), ps, present=set())
         self.assertEqual(client.status_calls, [("item-for-I_7", "Triage")])
 
     def test_present_item_not_pruned(self):
         client = FakeGitHub()
-        ps = fresh_ps(github_observations={"PI_1": {"number": 7, "content_id": "I_7", "status_name": "Ready"}})
+        ps = fresh_ps(
+            github_observations={
+                "PI_1": {"number": 7, "content_id": "I_7", "status_name": "Ready"}
+            }
+        )
         watcher.github_prune_recovery(client, gh_proj(client), ps, present={"PI_1"})
         self.assertEqual(client.added, [])
         self.assertIn("PI_1", ps["github_observations"])
@@ -395,7 +511,11 @@ class WriteSeamTest(unittest.TestCase):
         # Q3: Status writers never touch labels — the poller's shadow writer is
         # the single label writer.
         client = FakeGitHub()
-        client._issue_items[7] = {"item_id": "PI_1", "content_id": "I_7", "state": "OPEN"}
+        client._issue_items[7] = {
+            "item_id": "PI_1",
+            "content_id": "I_7",
+            "state": "OPEN",
+        }
         client._live["PI_1"] = "Ready"
         watcher.set_issue_agent_label(None, gh_proj(client), "7", watcher.WORKING_LABEL)
         self.assertEqual(client.status_calls, [("PI_1", "Working")])
@@ -403,23 +523,39 @@ class WriteSeamTest(unittest.TestCase):
 
     def test_terminal_write_over_active_status_succeeds(self):
         client = FakeGitHub()
-        client._issue_items[7] = {"item_id": "PI_1", "content_id": "I_7", "state": "OPEN"}
+        client._issue_items[7] = {
+            "item_id": "PI_1",
+            "content_id": "I_7",
+            "state": "OPEN",
+        }
         client._live["PI_1"] = "Working"  # worker was running
-        watcher.set_issue_agent_label(None, gh_proj(client), "7", watcher.MR_READY_LABEL)
+        watcher.set_issue_agent_label(
+            None, gh_proj(client), "7", watcher.MR_READY_LABEL
+        )
         self.assertEqual(client.status_calls, [("PI_1", "Review")])
 
     def test_terminal_write_refused_over_newer_nonactive_status(self):
         # Q2: a human dragged the card to Parked; a stale worker completion must
         # not clobber that newer non-active Status.
         client = FakeGitHub()
-        client._issue_items[7] = {"item_id": "PI_1", "content_id": "I_7", "state": "OPEN"}
+        client._issue_items[7] = {
+            "item_id": "PI_1",
+            "content_id": "I_7",
+            "state": "OPEN",
+        }
         client._live["PI_1"] = "Parked"
-        watcher.set_issue_agent_label(None, gh_proj(client), "7", watcher.MR_READY_LABEL)
+        watcher.set_issue_agent_label(
+            None, gh_proj(client), "7", watcher.MR_READY_LABEL
+        )
         self.assertEqual(client.status_calls, [])  # refused
 
     def test_idempotent_when_status_already_set(self):
         client = FakeGitHub()
-        client._issue_items[7] = {"item_id": "PI_1", "content_id": "I_7", "state": "OPEN"}
+        client._issue_items[7] = {
+            "item_id": "PI_1",
+            "content_id": "I_7",
+            "state": "OPEN",
+        }
         client._live["PI_1"] = "Working"
         watcher.set_issue_agent_label(None, gh_proj(client), "7", watcher.WORKING_LABEL)
         self.assertEqual(client.status_calls, [])  # no-op
@@ -436,13 +572,17 @@ class WriteSeamTest(unittest.TestCase):
         # Q3: set_issue_labels (used by interrupted-launch recovery) writes no
         # labels on GitHub — the poller owns the shadow.
         client = FakeGitHub()
-        watcher.set_issue_labels(None, gh_proj(client), "7", remove=[watcher.WORKING_LABEL])
+        watcher.set_issue_labels(
+            None, gh_proj(client), "7", remove=[watcher.WORKING_LABEL]
+        )
         self.assertEqual(client.label_calls, [])
 
     def test_post_note_uses_gh_issue_comment(self):
         client = FakeGitHub()
         posts = []
-        client.post_comment = lambda number, body: posts.append((number, body)) or {"id": "url"}
+        client.post_comment = lambda number, body: (
+            posts.append((number, body)) or {"id": "url"}
+        )
         conv = {"reply_target": {"kind": "issue", "issue_iid": "7"}, "issue_iid": "7"}
         result = watcher.post_conversation_note(None, gh_proj(client), conv, "done")
         self.assertEqual(posts, [(7, "done")])
@@ -455,12 +595,20 @@ class WriteSeamTest(unittest.TestCase):
 class ConfigValidationTest(unittest.TestCase):
     def test_github_requires_project_id(self):
         with self.assertRaises(watcher.ConfigurationError):
-            watcher.validate_github_projects([{"forge": "github", "path": "owner/repo"}])
+            watcher.validate_github_projects(
+                [{"forge": "github", "path": "owner/repo"}]
+            )
 
     def test_github_rejects_non_pvt_id(self):
         with self.assertRaises(watcher.ConfigurationError):
             watcher.validate_github_projects(
-                [{"forge": "github", "path": "owner/repo", "github_project_id": "12345"}]
+                [
+                    {
+                        "forge": "github",
+                        "path": "owner/repo",
+                        "github_project_id": "12345",
+                    }
+                ]
             )
 
     def test_github_requires_owner_name_path(self):
@@ -496,14 +644,29 @@ class FakeGhResponder:
                             "pageInfo": {"hasNextPage": True, "endCursor": "C1"},
                             "nodes": [
                                 {
-                                    "id": "PI_1", "updatedAt": "2026-07-18T00:00:00Z",
-                                    "fieldValueByName": {"name": "Ready", "optionId": "opt-Ready"},
-                                    "content": {"__typename": "Issue", "id": "I_7", "number": 7,
-                                                "state": "OPEN", "title": "t", "url": "u", "body": "b"},
+                                    "id": "PI_1",
+                                    "updatedAt": "2026-07-18T00:00:00Z",
+                                    "fieldValueByName": {
+                                        "name": "Ready",
+                                        "optionId": "opt-Ready",
+                                    },
+                                    "content": {
+                                        "__typename": "Issue",
+                                        "id": "I_7",
+                                        "number": 7,
+                                        "state": "OPEN",
+                                        "title": "t",
+                                        "url": "u",
+                                        "body": "b",
+                                    },
                                 },
                                 {  # PR content is skipped
-                                    "id": "PI_pr", "updatedAt": "x",
-                                    "fieldValueByName": {"name": "Ready", "optionId": "opt-Ready"},
+                                    "id": "PI_pr",
+                                    "updatedAt": "x",
+                                    "fieldValueByName": {
+                                        "name": "Ready",
+                                        "optionId": "opt-Ready",
+                                    },
                                     "content": {"__typename": "PullRequest"},
                                 },
                             ],
@@ -519,10 +682,21 @@ class FakeGhResponder:
                             "pageInfo": {"hasNextPage": False, "endCursor": None},
                             "nodes": [
                                 {  # closed issue skipped
-                                    "id": "PI_closed", "updatedAt": "x",
-                                    "fieldValueByName": {"name": "Triage", "optionId": "opt-Triage"},
-                                    "content": {"__typename": "Issue", "id": "I_9", "number": 9,
-                                                "state": "CLOSED", "title": "t", "url": "u", "body": "b"},
+                                    "id": "PI_closed",
+                                    "updatedAt": "x",
+                                    "fieldValueByName": {
+                                        "name": "Triage",
+                                        "optionId": "opt-Triage",
+                                    },
+                                    "content": {
+                                        "__typename": "Issue",
+                                        "id": "I_9",
+                                        "number": 9,
+                                        "state": "CLOSED",
+                                        "title": "t",
+                                        "url": "u",
+                                        "body": "b",
+                                    },
                                 },
                             ],
                         }
@@ -536,16 +710,35 @@ class FakeGhResponder:
         self.calls.append(args)
         query = next((a for a in args if a.startswith("query=")), "")
         if "field(name:" in query or 'field(name: "Status")' in query:
-            body = {"data": {"node": {"field": {
-                "id": "FIELD_status",
-                "options": [{"id": f"opt-{n}", "name": n} for n in watcher.STATUS_TO_LABEL],
-            }}}}
+            body = {
+                "data": {
+                    "node": {
+                        "field": {
+                            "id": "FIELD_status",
+                            "options": [
+                                {"id": f"opt-{n}", "name": n}
+                                for n in watcher.STATUS_TO_LABEL
+                            ],
+                        }
+                    }
+                }
+            }
         elif "updateProjectV2ItemFieldValue" in query:
-            body = {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PI_1"}}}}
+            body = {
+                "data": {
+                    "updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PI_1"}}
+                }
+            }
         elif "addProjectV2ItemById" in query:
             body = {"data": {"addProjectV2ItemById": {"item": {"id": "PI_new"}}}}
         elif "node(id: $item)" in query:
-            body = {"data": {"node": {"fieldValueByName": {"name": "Review", "optionId": "opt-Review"}}}}
+            body = {
+                "data": {
+                    "node": {
+                        "fieldValueByName": {"name": "Review", "optionId": "opt-Review"}
+                    }
+                }
+            }
         elif "items(" in query:
             body = self.pages[self._page]
             self._page += 1
@@ -572,7 +765,11 @@ class ClientTest(unittest.TestCase):
 
     def test_schema_fail_closed_when_status_field_missing(self):
         def responder(args, **kwargs):
-            return mock.Mock(returncode=0, stdout=json.dumps({"data": {"node": {"field": None}}}), stderr="")
+            return mock.Mock(
+                returncode=0,
+                stdout=json.dumps({"data": {"node": {"field": None}}}),
+                stderr="",
+            )
 
         client = self._client(responder)
         with self.assertRaises(watcher.ConfigurationError):
@@ -582,7 +779,11 @@ class ClientTest(unittest.TestCase):
         # Q5: a renamed/deleted fixed option (here Needs-info missing) fails closed
         # instead of silently becoming an unmapped Status.
         def responder(args, **kwargs):
-            opts = [{"id": f"opt-{n}", "name": n} for n in watcher.STATUS_TO_LABEL if n != "Needs-info"]
+            opts = [
+                {"id": f"opt-{n}", "name": n}
+                for n in watcher.STATUS_TO_LABEL
+                if n != "Needs-info"
+            ]
             body = {"data": {"node": {"field": {"id": "F", "options": opts}}}}
             return mock.Mock(returncode=0, stdout=json.dumps(body), stderr="")
 
@@ -609,15 +810,41 @@ class ClientTest(unittest.TestCase):
             q = next((a for a in args if a.startswith("query=")), "")
             if "field(name:" in q:
                 opts = [{"id": f"opt-{n}", "name": n} for n in watcher.STATUS_TO_LABEL]
-                return mock.Mock(returncode=0, stdout=json.dumps({"data": {"node": {"field": {"id": "F", "options": opts}}}}), stderr="")
+                return mock.Mock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {"data": {"node": {"field": {"id": "F", "options": opts}}}}
+                    ),
+                    stderr="",
+                )
             if "updateProjectV2ItemFieldValue" in q:
                 state["n"] += 1
                 # First write is reverted by the workflow; second sticks.
                 state["live"] = None if state["n"] == 1 else "opt-Working"
-                return mock.Mock(returncode=0, stdout=json.dumps({"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PI_1"}}}}), stderr="")
+                return mock.Mock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "data": {
+                                "updateProjectV2ItemFieldValue": {
+                                    "projectV2Item": {"id": "PI_1"}
+                                }
+                            }
+                        }
+                    ),
+                    stderr="",
+                )
             if "node(id: $item)" in q:
-                fv = {"name": "Working", "optionId": "opt-Working"} if state["live"] == "opt-Working" else None
-                return mock.Mock(returncode=0, stdout=json.dumps({"data": {"node": {"fieldValueByName": fv}}}), stderr="")
+                fv = (
+                    {"name": "Working", "optionId": "opt-Working"}
+                    if state["live"] == "opt-Working"
+                    else None
+                )
+                return mock.Mock(
+                    returncode=0,
+                    stdout=json.dumps({"data": {"node": {"fieldValueByName": fv}}}),
+                    stderr="",
+                )
             return mock.Mock(returncode=0, stdout=json.dumps({"data": {}}), stderr="")
 
         client = self._client(responder)
@@ -630,7 +857,11 @@ class ClientTest(unittest.TestCase):
         responder = FakeGhResponder()
         client = self._client(responder)
         client.set_status("PI_1", "Working")
-        mutations = [c for c in responder.calls if any("updateProjectV2ItemFieldValue" in a for a in c)]
+        mutations = [
+            c
+            for c in responder.calls
+            if any("updateProjectV2ItemFieldValue" in a for a in c)
+        ]
         self.assertEqual(len(mutations), 1)
         flat = " ".join(mutations[0])
         self.assertIn("option=opt-Working", flat)
@@ -651,7 +882,11 @@ class ClientTest(unittest.TestCase):
 
     def test_graphql_raises_on_errors_payload(self):
         def responder(args, **kwargs):
-            return mock.Mock(returncode=0, stdout=json.dumps({"errors": [{"message": "boom"}]}), stderr="")
+            return mock.Mock(
+                returncode=0,
+                stdout=json.dumps({"errors": [{"message": "boom"}]}),
+                stderr="",
+            )
 
         client = self._client(responder)
         with self.assertRaises(watcher.GitHubGraphQLError):
@@ -664,7 +899,9 @@ class ClientTest(unittest.TestCase):
             calls["n"] += 1
             if calls["n"] == 1:
                 return mock.Mock(returncode=1, stdout="", stderr="rate limited")
-            return mock.Mock(returncode=0, stdout=json.dumps({"data": {"ok": 1}}), stderr="")
+            return mock.Mock(
+                returncode=0, stdout=json.dumps({"data": {"ok": 1}}), stderr=""
+            )
 
         client = self._client(responder)
         with mock.patch("time.sleep"):

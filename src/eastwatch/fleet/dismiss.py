@@ -85,15 +85,23 @@ def dismiss(identity: str, run_id: str, *, root: Path | None = None) -> None:
 
         try:
             project_key, conversation_key = identity.rsplit(":", 1)
-            conversation = state["projects"][project_key]["conversations"][conversation_key]
+            conversation = state["projects"][project_key]["conversations"][
+                conversation_key
+            ]
         except (KeyError, ValueError):
             raise LookupError(f"finished run no longer exists: {identity}") from None
 
         archived = conversation.get("last_run")
-        if conversation.get("current_run") or conversation.get("status") != "done" or not archived:
+        if (
+            conversation.get("current_run")
+            or conversation.get("status") != "done"
+            or not archived
+        ):
             raise RuntimeError("selected conversation is no longer finished")
         if not run_id or archived.get("run_id") != run_id:
-            raise RuntimeError("selected finished run was replaced; refresh and try again")
+            raise RuntimeError(
+                "selected finished run was replaced; refresh and try again"
+            )
 
         kill_session(archived.get("tmux_session"))
         conversation["last_run"] = None
@@ -129,7 +137,9 @@ def dismiss_all_finished(*, root: Path | None = None) -> BulkDismissResult:
         failures: list[tuple[str, str, str]] = []
 
         for project_key, project in state.get("projects", {}).items():
-            for conversation_key, conversation in project.get("conversations", {}).items():
+            for conversation_key, conversation in project.get(
+                "conversations", {}
+            ).items():
                 if not is_terminal_conversation(conversation):
                     continue
                 archived = conversation["last_run"]
@@ -174,7 +184,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if result.failures else 0
 
     if len(args) != 2:
-        print("usage: fleet-dismiss [--all-finished | IDENTITY RUN_ID]", file=sys.stderr)
+        print(
+            "usage: fleet-dismiss [--all-finished | IDENTITY RUN_ID]", file=sys.stderr
+        )
         return 2
     try:
         dismiss(args[0], args[1])

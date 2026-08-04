@@ -38,9 +38,7 @@ STATE_ORDER = {
     "queued": 5,
     "parked-review": 6,
 }
-RESUMABLE_STATES = frozenset(
-    {"crashed", "finished", "parked-input", "parked-review"}
-)
+RESUMABLE_STATES = frozenset({"crashed", "finished", "parked-input", "parked-review"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +68,9 @@ class FleetRow:
         display_model = str(raw.get("model") or "?")
         model_parts = display_model.split(":")
         provider = str(raw.get("provider") or (model_parts[0] if model_parts else "?"))
-        model_id = str(raw.get("model_id") or (model_parts[1] if len(model_parts) > 1 else "?"))
+        model_id = str(
+            raw.get("model_id") or (model_parts[1] if len(model_parts) > 1 else "?")
+        )
         key = str(raw.get("key") or "task-?")
         return cls(
             identity=str(raw.get("identity") or key),
@@ -165,7 +165,9 @@ def parse_rows(payload: object) -> tuple[FleetRow, ...]:
     return sort_rows([FleetRow.from_mapping(item) for item in payload])
 
 
-def preserve_selection(rows: Sequence[FleetRow], selected_identity: str | None) -> str | None:
+def preserve_selection(
+    rows: Sequence[FleetRow], selected_identity: str | None
+) -> str | None:
     if not rows:
         return None
     if selected_identity and any(row.identity == selected_identity for row in rows):
@@ -235,10 +237,16 @@ def fuzzy_filter_rows(
 
 def state_dir() -> Path:
     configured = getenv("EASTWATCH_STATE_DIR")
-    return Path(configured).expanduser() if configured else Path.home() / ".local/state/eastwatch"
+    return (
+        Path(configured).expanduser()
+        if configured
+        else Path.home() / ".local/state/eastwatch"
+    )
 
 
-def heartbeat_age(path: Path | None = None, *, now: float | None = None) -> float | None:
+def heartbeat_age(
+    path: Path | None = None, *, now: float | None = None
+) -> float | None:
     state_path = path or state_dir() / "state.json"
     try:
         modified = state_path.stat().st_mtime
@@ -263,7 +271,9 @@ async def fetch_snapshot(
             start_new_session=True,
         )
     except OSError as exc:
-        return FleetSnapshot((), refreshed_at, heartbeat_age(state_path), f"fleet-status: {exc}")
+        return FleetSnapshot(
+            (), refreshed_at, heartbeat_age(state_path), f"fleet-status: {exc}"
+        )
 
     communicate = asyncio.create_task(proc.communicate())
     try:
@@ -295,7 +305,9 @@ async def fetch_snapshot(
     try:
         rows = parse_rows(json.loads(stdout))
     except (json.JSONDecodeError, ValueError) as exc:
-        return FleetSnapshot((), refreshed_at, heartbeat_age(state_path), f"fleet-status: {exc}")
+        return FleetSnapshot(
+            (), refreshed_at, heartbeat_age(state_path), f"fleet-status: {exc}"
+        )
     return FleetSnapshot(rows, refreshed_at, heartbeat_age(state_path))
 
 
@@ -361,7 +373,11 @@ class FleetLog:
             return False
         if not isinstance(event, dict):
             return False
-        chunks = self._render_pi(event) if self.provider == "pi" else self._render_claude(event)
+        chunks = (
+            self._render_pi(event)
+            if self.provider == "pi"
+            else self._render_claude(event)
+        )
         for chunk in chunks:
             self._feed_chunk(chunk)
         return bool(chunks)
@@ -380,7 +396,9 @@ class FleetLog:
                     chunks.append(RenderChunk("· thinking…"))
                 elif block_type == "tool_use":
                     detail = _tool_detail(block.get("input"))
-                    chunks.append(RenderChunk(f"→ {block.get('name', '?')} {detail}".rstrip()))
+                    chunks.append(
+                        RenderChunk(f"→ {block.get('name', '?')} {detail}".rstrip())
+                    )
             return chunks
         if event_type == "result":
             return [RenderChunk(f"── {event.get('subtype', 'done')}")]
@@ -401,7 +419,9 @@ class FleetLog:
                     chunks.append(RenderChunk(str(block["text"])))
                 elif block_type == "toolCall":
                     detail = _tool_detail(block.get("arguments"))
-                    chunks.append(RenderChunk(f"→ {block.get('name', '?')} {detail}".rstrip()))
+                    chunks.append(
+                        RenderChunk(f"→ {block.get('name', '?')} {detail}".rstrip())
+                    )
             return chunks
         if event_type == "message_update":
             update = event.get("assistantMessageEvent") or {}

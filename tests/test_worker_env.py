@@ -22,7 +22,9 @@ class WorkerEnvTest(unittest.TestCase):
     def test_worker_env_defaults_config_paths_from_home(self):
         home = TMP_ROOT / "home"
 
-        with patch.dict(os.environ, {"HOME": str(home), "PATH": "/plist/bin"}, clear=True):
+        with patch.dict(
+            os.environ, {"HOME": str(home), "PATH": "/plist/bin"}, clear=True
+        ):
             with patch.object(watcher, "zshenv_path", return_value=None):
                 env = watcher.worker_env({})
 
@@ -68,7 +70,7 @@ class WorkerEnvTest(unittest.TestCase):
 
     def test_worker_env_uses_zshenv_path(self):
         completed = watcher.subprocess.CompletedProcess(
-            ["/bin/zsh", "-lc", "print -r -- \"$PATH\""],
+            ["/bin/zsh", "-lc", 'print -r -- "$PATH"'],
             0,
             stdout="/from/zshenv/bin:/plist/bin\n",
             stderr="",
@@ -79,7 +81,9 @@ class WorkerEnvTest(unittest.TestCase):
             captured_env.update(kwargs["env"])
             return completed
 
-        with patch.dict(os.environ, {"PATH": "/plist/bin", "HOME": str(TMP_ROOT)}, clear=True):
+        with patch.dict(
+            os.environ, {"PATH": "/plist/bin", "HOME": str(TMP_ROOT)}, clear=True
+        ):
             with patch.object(watcher.subprocess, "run", side_effect=fake_run) as run:
                 env = watcher.worker_env({"host": "git.example.com"})
 
@@ -90,12 +94,14 @@ class WorkerEnvTest(unittest.TestCase):
 
     def test_worker_env_keeps_existing_path_when_zshenv_path_unavailable(self):
         completed = watcher.subprocess.CompletedProcess(
-            ["/bin/zsh", "-lc", "print -r -- \"$PATH\""],
+            ["/bin/zsh", "-lc", 'print -r -- "$PATH"'],
             1,
             stdout="",
             stderr="zsh failed",
         )
-        with patch.dict(os.environ, {"PATH": "/plist/bin", "HOME": str(TMP_ROOT)}, clear=True):
+        with patch.dict(
+            os.environ, {"PATH": "/plist/bin", "HOME": str(TMP_ROOT)}, clear=True
+        ):
             with patch.object(watcher.subprocess, "run", return_value=completed):
                 env = watcher.worker_env({})
 

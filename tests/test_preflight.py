@@ -142,7 +142,9 @@ class PreflightTest(unittest.TestCase):
 
         errors = self.preflight_errors()
 
-        self.assertEqual(errors, ["config must define at least one project under `projects`"])
+        self.assertEqual(
+            errors, ["config must define at least one project under `projects`"]
+        )
 
     def test_unknown_triggers_are_errors_with_project_bad_and_valid_names(self):
         self.config_path.write_text(
@@ -191,7 +193,9 @@ class PreflightTest(unittest.TestCase):
         )
 
         self.assertIn("config projects[0] must be a mapping", errors)
-        self.assertIn("duplicate project config for gitlab.example.com/group/project", errors)
+        self.assertIn(
+            "duplicate project config for gitlab.example.com/group/project", errors
+        )
 
     def test_top_level_jira_config_must_be_mapping(self):
         errors = watcher.validate_preflight_config(
@@ -294,10 +298,7 @@ class PreflightTest(unittest.TestCase):
 
     def test_github_projects_use_existing_canonical_id_rule(self):
         self.config_path.write_text(
-            "projects:\n"
-            "  - forge: github\n"
-            "    host: github.com\n"
-            "    path: owner/repo\n"
+            "projects:\n  - forge: github\n    host: github.com\n    path: owner/repo\n"
         )
         self.write_valid_state()
         self.write_valid_plist()
@@ -305,7 +306,9 @@ class PreflightTest(unittest.TestCase):
         errors = self.preflight_errors()
 
         self.assertTrue(any("github_project_id" in error for error in errors), errors)
-        self.assertTrue(any("glab-board setup --board" in error for error in errors), errors)
+        self.assertTrue(
+            any("glab-board setup --board" in error for error in errors), errors
+        )
 
     def test_vault_project_requires_vault_path(self):
         errors = watcher.validate_preflight_config(
@@ -313,7 +316,10 @@ class PreflightTest(unittest.TestCase):
         )
 
         self.assertTrue(
-            any("forge: vault requires a non-empty `vault_path`" in error for error in errors),
+            any(
+                "forge: vault requires a non-empty `vault_path`" in error
+                for error in errors
+            ),
             errors,
         )
 

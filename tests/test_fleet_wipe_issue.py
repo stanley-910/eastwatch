@@ -63,7 +63,9 @@ class FleetWipeIssueTest(unittest.TestCase):
     def test_wipes_state_backup_mr_mapping_and_artifacts(self):
         result = self.run_script("--yes", "example-repo", "102")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Wiped gitlab.example/example-org/example-repo issue 102", result.stdout)
+        self.assertIn(
+            "Wiped gitlab.example/example-org/example-repo issue 102", result.stdout
+        )
 
         for path in (self.state_path, self.backup_path):
             state = json.loads(path.read_text())
@@ -75,9 +77,9 @@ class FleetWipeIssueTest(unittest.TestCase):
         self.assertFalse(self.artifacts.exists())
 
     def test_refuses_active_run_without_changing_anything(self):
-        self.state["projects"]["gitlab.example/example-org/example-repo"]["conversations"]["102"][
-            "current_run"
-        ] = {"run_id": "active"}
+        self.state["projects"]["gitlab.example/example-org/example-repo"][
+            "conversations"
+        ]["102"]["current_run"] = {"run_id": "active"}
         self.state_path.write_text(json.dumps(self.state))
 
         result = self.run_script("--yes", "example-repo", "102")
@@ -87,7 +89,9 @@ class FleetWipeIssueTest(unittest.TestCase):
         state = json.loads(self.state_path.read_text())
         self.assertIn(
             "102",
-            state["projects"]["gitlab.example/example-org/example-repo"]["conversations"],
+            state["projects"]["gitlab.example/example-org/example-repo"][
+                "conversations"
+            ],
         )
 
     def test_requires_unambiguous_project_slug(self):
@@ -106,9 +110,9 @@ class FleetWipeIssueTest(unittest.TestCase):
         outside = self.root.with_name(f"{self.root.name}-outside")
         outside.mkdir()
         try:
-            conversation = self.state["projects"]["gitlab.example/example-org/example-repo"][
-                "conversations"
-            ]["102"]
+            conversation = self.state["projects"][
+                "gitlab.example/example-org/example-repo"
+            ]["conversations"]["102"]
             conversation["session_dir"] = str(outside)
             self.state_path.write_text(json.dumps(self.state))
 

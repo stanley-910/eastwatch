@@ -91,7 +91,10 @@ class FetchItemsTest(VaultBoardTestBase):
     def test_skips_malformed_yaml_without_raising(self):
         # A broken frontmatter note must be skipped, not crash the cycle, and it
         # must not hide a valid neighbour.
-        self.write_note("broken.md", "---\ntitle: [unterminated\nstatus: agent\ntags: task\n---\n\nx\n")
+        self.write_note(
+            "broken.md",
+            "---\ntitle: [unterminated\nstatus: agent\ntags: task\n---\n\nx\n",
+        )
         self.write_note("good.md", "---\nstatus: agent\ntags: task\n---\n\nok\n")
 
         items = self.board.fetch_items()
@@ -101,10 +104,15 @@ class FetchItemsTest(VaultBoardTestBase):
 
 class IdentityTest(VaultBoardTestBase):
     def test_item_id_stable_across_body_edit(self):
-        path = self.write_note("task.md", "---\nstatus: open\ntags: task\n---\n\nfirst body\n")
+        path = self.write_note(
+            "task.md", "---\nstatus: open\ntags: task\n---\n\nfirst body\n"
+        )
         before = self.board.fetch_items()[0]["item_id"]
 
-        path.write_text("---\nstatus: open\ntags: task\n---\n\nedited much longer body\n", encoding="utf-8")
+        path.write_text(
+            "---\nstatus: open\ntags: task\n---\n\nedited much longer body\n",
+            encoding="utf-8",
+        )
         after = self.board.fetch_items()[0]["item_id"]
 
         self.assertEqual(before, after)
@@ -131,7 +139,9 @@ class SurgicalWriteTest(VaultBoardTestBase):
         self.assertEqual(diffs[0][1], "status: in-progress\n")
 
     def test_set_status_fenced_refuses_when_not_active(self):
-        path = self.write_note("task.md", "---\nstatus: review\ntags: task\n---\n\nbody\n")
+        path = self.write_note(
+            "task.md", "---\nstatus: review\ntags: task\n---\n\nbody\n"
+        )
         original = path.read_text(encoding="utf-8")
 
         wrote = self.board.set_status_fenced(str(path), "done")
@@ -140,7 +150,9 @@ class SurgicalWriteTest(VaultBoardTestBase):
         self.assertEqual(path.read_text(encoding="utf-8"), original)  # no write at all
 
     def test_set_status_fenced_writes_when_active(self):
-        path = self.write_note("task.md", "---\nstatus: in-progress\ntags: task\n---\n\nbody\n")
+        path = self.write_note(
+            "task.md", "---\nstatus: in-progress\ntags: task\n---\n\nbody\n"
+        )
 
         wrote = self.board.set_status_fenced(str(path), "review")
 
@@ -148,7 +160,9 @@ class SurgicalWriteTest(VaultBoardTestBase):
         self.assertEqual(self.board.read_status(str(path)), "review")
 
     def test_write_frontmatter_field_inserts_then_replaces(self):
-        path = self.write_note("task.md", "---\nstatus: agent\ntags: task\n---\n\nbody\n")
+        path = self.write_note(
+            "task.md", "---\nstatus: agent\ntags: task\n---\n\nbody\n"
+        )
 
         self.board.write_frontmatter_field(str(path), "session-id", "abc-123")
         fm, _, _ = split_frontmatter(path.read_text(encoding="utf-8"))
@@ -163,7 +177,9 @@ class SurgicalWriteTest(VaultBoardTestBase):
 
 class ResultSectionTest(VaultBoardTestBase):
     def test_append_is_idempotent(self):
-        path = self.write_note("task.md", "---\nstatus: review\ntags: task\n---\n\nbody\n")
+        path = self.write_note(
+            "task.md", "---\nstatus: review\ntags: task\n---\n\nbody\n"
+        )
 
         self.board.append_result_section(str(path), "First run output.")
         self.board.append_result_section(str(path), "Second run output.")
@@ -180,7 +196,9 @@ class AtomicWriteTest(VaultBoardTestBase):
         self.board.set_status(str(path), "in-progress")
         self.board.append_result_section(str(path), "done")
 
-        leftovers = list(self.tasks_dir.glob(".*.tmp")) + list(self.tasks_dir.glob("*.tmp"))
+        leftovers = list(self.tasks_dir.glob(".*.tmp")) + list(
+            self.tasks_dir.glob("*.tmp")
+        )
         self.assertEqual(leftovers, [])
         # And the note is whole, never a partial write.
         self.assertEqual(self.board.read_status(str(path)), "in-progress")
@@ -217,7 +235,9 @@ class GitCommitTest(unittest.TestCase):
     def _git(self, *args):
         return subprocess.run(
             ["git", "-C", str(self.vault), *args],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout
 
     def test_commits_exactly_the_one_file(self):
@@ -225,7 +245,9 @@ class GitCommitTest(unittest.TestCase):
         self._git("config", "user.email", "t@t.test")
         self._git("config", "user.name", "Test")
         note = self.tasks_dir / "task.md"
-        note.write_text("---\nstatus: review\ntags: task\n---\n\nbody\n", encoding="utf-8")
+        note.write_text(
+            "---\nstatus: review\ntags: task\n---\n\nbody\n", encoding="utf-8"
+        )
         # A second, unrelated dirty file must be left out of the commit.
         (self.vault / "other.md").write_text("untracked\n", encoding="utf-8")
 
@@ -241,14 +263,18 @@ class GitCommitTest(unittest.TestCase):
 
     def test_non_git_dir_is_a_noop_that_does_not_raise(self):
         note = self.tasks_dir / "task.md"
-        note.write_text("---\nstatus: review\ntags: task\n---\n\nbody\n", encoding="utf-8")
+        note.write_text(
+            "---\nstatus: review\ntags: task\n---\n\nbody\n", encoding="utf-8"
+        )
         board = VaultBoard(str(self.vault))
 
         board.git_commit(str(note), "no repo here")  # must not raise
 
     def test_commit_results_false_never_calls_git(self):
         note = self.tasks_dir / "task.md"
-        note.write_text("---\nstatus: review\ntags: task\n---\n\nbody\n", encoding="utf-8")
+        note.write_text(
+            "---\nstatus: review\ntags: task\n---\n\nbody\n", encoding="utf-8"
+        )
         board = VaultBoard(str(self.vault), commit_results=False)
 
         with mock.patch("eastwatch.vault.subprocess.run") as run:
@@ -259,7 +285,9 @@ class GitCommitTest(unittest.TestCase):
 
 class HelperTest(unittest.TestCase):
     def test_wikilink_targets_strips_alias_and_passes_bare_strings(self):
-        self.assertEqual(wikilink_targets("[[inbox/tasks/foo|foo]]"), ["inbox/tasks/foo"])
+        self.assertEqual(
+            wikilink_targets("[[inbox/tasks/foo|foo]]"), ["inbox/tasks/foo"]
+        )
         self.assertEqual(wikilink_targets(["[[a|x]]", "bare"]), ["a", "bare"])
         self.assertEqual(wikilink_targets(None), [])
 

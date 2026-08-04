@@ -145,7 +145,9 @@ class VaultBoard:
         return hashlib.sha1(rel_path.encode("utf-8")).hexdigest()[:12]
 
     def _rel(self, abs_path: str | Path) -> str:
-        return Path(abs_path).resolve().relative_to(self.vault_path.resolve()).as_posix()
+        return (
+            Path(abs_path).resolve().relative_to(self.vault_path.resolve()).as_posix()
+        )
 
     # -- reads ---------------------------------------------------------------
 
@@ -177,7 +179,9 @@ class VaultBoard:
             if not status:
                 continue
             rel = self._rel(path)
-            body = FRONTMATTER_RE.sub("", text, count=1)  # everything after the closing fence
+            body = FRONTMATTER_RE.sub(
+                "", text, count=1
+            )  # everything after the closing fence
             model = fm.get("model")
             session_id = fm.get("session-id") or fm.get("session_id")
             items.append(
@@ -191,7 +195,9 @@ class VaultBoard:
                     "model": str(model).strip() if model else None,
                     "session_id": str(session_id).strip() if session_id else None,
                     "mtime": os.path.getmtime(path),
-                    "blocked_by": wikilink_targets(fm.get("blockedBy") or fm.get("blocked-by")),
+                    "blocked_by": wikilink_targets(
+                        fm.get("blockedBy") or fm.get("blocked-by")
+                    ),
                 }
             )
         return items
@@ -237,15 +243,23 @@ class VaultBoard:
 
     def set_status(self, abs_path: str | Path, new_status: str) -> None:
         """Move the note's ``status:`` line, touching nothing else."""
+
         def mutate(inner: str) -> str:
             if _STATUS_LINE_RE.search(inner):
-                return _STATUS_LINE_RE.sub(rf"\g<indent>status: {new_status}", inner, count=1)
+                return _STATUS_LINE_RE.sub(
+                    rf"\g<indent>status: {new_status}", inner, count=1
+                )
             sep = "" if inner.endswith("\n") or not inner else "\n"
             return f"{inner}{sep}status: {new_status}"
+
         self._edit_frontmatter(abs_path, mutate)
 
     def set_status_fenced(
-        self, abs_path: str | Path, new_status: str, *, active: frozenset[str] = VAULT_ACTIVE_STATUSES
+        self,
+        abs_path: str | Path,
+        new_status: str,
+        *,
+        active: frozenset[str] = VAULT_ACTIVE_STATUSES,
     ) -> bool:
         """Guarded terminal write: only move to ``new_status`` if the note is
         still one of ``active`` (i.e. we still own it). A human who dragged the
@@ -254,13 +268,16 @@ class VaultBoard:
         if live is not None and live not in active:
             log.info(
                 "vault: skipping status write to %s on %s — human moved it there since dispatch",
-                new_status, self._rel(abs_path),
+                new_status,
+                self._rel(abs_path),
             )
             return False
         self.set_status(abs_path, new_status)
         return True
 
-    def write_frontmatter_field(self, abs_path: str | Path, field: str, value: str) -> None:
+    def write_frontmatter_field(
+        self, abs_path: str | Path, field: str, value: str
+    ) -> None:
         """Set-or-insert a scalar frontmatter line (e.g. persist ``session-id:``)."""
         pattern = _field_line_re(field)
 
@@ -269,6 +286,7 @@ class VaultBoard:
                 return pattern.sub(rf"\g<indent>{field}: {value}", inner, count=1)
             sep = "" if inner.endswith("\n") or not inner else "\n"
             return f"{inner}{sep}{field}: {value}"
+
         self._edit_frontmatter(abs_path, mutate)
 
     def append_result_section(
@@ -284,11 +302,16 @@ class VaultBoard:
         if existing:
             new_text = text[: existing.start()] + block
         else:
-            sep = "" if text.endswith("\n\n") else "\n" if text.endswith("\n") else "\n\n"
+            sep = (
+                "" if text.endswith("\n\n") else "\n" if text.endswith("\n") else "\n\n"
+            )
             new_text = f"{text}{sep}{block}"
         self._atomic_write(abs_path, new_text)
         rel = self._rel(abs_path)
-        return {"id": f"result-{hashlib.sha1(body.encode('utf-8')).hexdigest()[:8]}", "note_path": rel}
+        return {
+            "id": f"result-{hashlib.sha1(body.encode('utf-8')).hexdigest()[:8]}",
+            "note_path": rel,
+        }
 
     # -- git -----------------------------------------------------------------
 
@@ -301,11 +324,17 @@ class VaultBoard:
         try:
             subprocess.run(
                 ["git", "-C", str(self.vault_path), "add", "--", rel],
-                capture_output=True, text=True, timeout=30, check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
             )
             subprocess.run(
                 ["git", "-C", str(self.vault_path), "commit", "-m", message, "--", rel],
-                capture_output=True, text=True, timeout=30, check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
             )
         except (OSError, subprocess.SubprocessError) as e:
             log.warning("vault: git commit of %s failed (non-fatal): %s", rel, e)

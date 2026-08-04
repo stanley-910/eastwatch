@@ -46,7 +46,9 @@ class RetentionSweepTest(unittest.TestCase):
         recent_failure_dir = self.run_dir("recent-failure", "run-3")
         success = self.terminal_run(success_dir, success=True, age_days=8)
         failure = self.terminal_run(failure_dir, success=False, age_days=31)
-        recent_failure = self.terminal_run(recent_failure_dir, success=False, age_days=29)
+        recent_failure = self.terminal_run(
+            recent_failure_dir, success=False, age_days=29
+        )
         state = {
             "projects": {
                 "project": {
@@ -73,13 +75,7 @@ class RetentionSweepTest(unittest.TestCase):
         directory = self.run_dir("corrupt", "run-corrupt")
         run = self.terminal_run(directory, success=True, age_days=8)
         Path(run["result_path"]).write_text("not-json")
-        state = {
-            "projects": {
-                "project": {
-                    "conversations": {"1": {"last_run": run}}
-                }
-            }
-        }
+        state = {"projects": {"project": {"conversations": {"1": {"last_run": run}}}}}
 
         self.watcher.sweep_artifacts(state, now=self.now)
 
@@ -135,11 +131,7 @@ class RetentionSweepTest(unittest.TestCase):
         legacy = self.terminal_run(legacy_dir, success=True, age_days=60)
         (legacy_dir / "run.jsonl").unlink()
         state = {
-            "projects": {
-                "project": {
-                    "conversations": {"1": {"last_run": legacy}}
-                }
-            }
+            "projects": {"project": {"conversations": {"1": {"last_run": legacy}}}}
         }
 
         self.watcher.sweep_artifacts(state, now=self.now, include_legacy=False)
@@ -149,13 +141,19 @@ class RetentionSweepTest(unittest.TestCase):
 
     def test_daily_sweep_runs_once_per_interval(self):
         state = {"projects": {}}
-        with mock.patch.object(self.watcher, "sweep_artifacts", return_value={
-            "tails": 0,
-            "raw_captures": 0,
-            "orphans": 0,
-        }) as sweep:
+        with mock.patch.object(
+            self.watcher,
+            "sweep_artifacts",
+            return_value={
+                "tails": 0,
+                "raw_captures": 0,
+                "orphans": 0,
+            },
+        ) as sweep:
             self.assertTrue(self.watcher.maybe_sweep_artifacts(state, now=self.now))
-            self.assertFalse(self.watcher.maybe_sweep_artifacts(state, now=self.now + 60))
+            self.assertFalse(
+                self.watcher.maybe_sweep_artifacts(state, now=self.now + 60)
+            )
         sweep.assert_called_once_with(state, now=self.now, include_legacy=False)
 
     def test_new_run_layout_has_journal_and_no_duplicate_stdout_or_stream(self):

@@ -50,9 +50,11 @@ FLEET_DISMISS = entrypoint_command("eastwatch.fleet.dismiss", "fleet-dismiss")
 FINISHED_TRACE_GRACE_S = 24 * 60 * 60
 FINISHED_TRACE_LINES = 500
 ALL_REPOSITORIES = "*"
-STATE_PATH = Path(
-    getenv("EASTWATCH_STATE_DIR") or str(Path.home() / ".local/state/eastwatch")
-) / "state.json"
+STATE_PATH = (
+    Path(getenv("EASTWATCH_STATE_DIR") or str(Path.home() / ".local/state/eastwatch"))
+    / "state.json"
+)
+
 
 @dataclass(frozen=True)
 class FleetTheme:
@@ -77,8 +79,7 @@ class FleetTheme:
             panel=colors["panel_2"],
             dark=True,
             variables={
-                f"fleet-{key.replace('_', '-')}": value
-                for key, value in colors.items()
+                f"fleet-{key.replace('_', '-')}": value for key, value in colors.items()
             },
         )
 
@@ -92,17 +93,17 @@ FLEET_THEMES = {
         label="Catppuccin Mocha",
         description="Cool pastels on a deep blue-black base",
         colors={
-            "void": "#1e1e2e",       # base
-            "trace": "#181825",      # mantle
-            "panel": "#313244",      # surface0
-            "panel_2": "#45475a",    # surface1
-            "divider": "#585b70",    # surface2
-            "fog": "#cdd6f4",        # text
-            "muted": "#6c7086",      # overlay0
-            "glacier": "#89b4fa",    # blue
-            "amber": "#f9e2af",      # yellow
-            "coral": "#f38ba8",      # red
-            "mint": "#a6e3a1",       # green
+            "void": "#1e1e2e",  # base
+            "trace": "#181825",  # mantle
+            "panel": "#313244",  # surface0
+            "panel_2": "#45475a",  # surface1
+            "divider": "#585b70",  # surface2
+            "fog": "#cdd6f4",  # text
+            "muted": "#6c7086",  # overlay0
+            "glacier": "#89b4fa",  # blue
+            "amber": "#f9e2af",  # yellow
+            "coral": "#f38ba8",  # red
+            "mint": "#a6e3a1",  # green
         },
     ),
     "gruvbox-dark-hard": FleetTheme(
@@ -110,17 +111,17 @@ FLEET_THEMES = {
         label="Gruvbox Dark Hard",
         description="Warm retro colors with a hard-contrast base",
         colors={
-            "void": "#1d2021",       # dark0_hard
-            "trace": "#1d2021",      # dark0_hard
-            "panel": "#3c3836",      # dark1
-            "panel_2": "#504945",    # dark2
-            "divider": "#665c54",    # dark3
-            "fog": "#ebdbb2",        # light1
-            "muted": "#928374",      # gray
-            "glacier": "#8ec07c",    # bright_aqua
-            "amber": "#fabd2f",      # bright_yellow
-            "coral": "#fb4934",      # bright_red
-            "mint": "#b8bb26",       # bright_green
+            "void": "#1d2021",  # dark0_hard
+            "trace": "#1d2021",  # dark0_hard
+            "panel": "#3c3836",  # dark1
+            "panel_2": "#504945",  # dark2
+            "divider": "#665c54",  # dark3
+            "fog": "#ebdbb2",  # light1
+            "muted": "#928374",  # gray
+            "glacier": "#8ec07c",  # bright_aqua
+            "amber": "#fabd2f",  # bright_yellow
+            "coral": "#fb4934",  # bright_red
+            "mint": "#b8bb26",  # bright_green
         },
     ),
 }
@@ -233,9 +234,7 @@ class TraceView(RichLog):
         self.post_message(self.FollowStateChanged(self.following, self.unseen_events))
 
     def set_following(self, following: bool) -> None:
-        changed = (
-            following != self.following or following and self.unseen_events > 0
-        )
+        changed = following != self.following or following and self.unseen_events > 0
         self.following = following
         if following:
             self.unseen_events = 0
@@ -985,7 +984,9 @@ class FleetApp(App):
         self.repository_scope = repository_key
         self._apply_row_filters()
         label = self._repository_label()
-        self._set_notice(f"Repository scope · {label} · {len(self._visible_rows())} visible")
+        self._set_notice(
+            f"Repository scope · {label} · {len(self._visible_rows())} visible"
+        )
 
     def action_digit(self, digit: str) -> None:
         if self._filter_editing:
@@ -1002,7 +1003,9 @@ class FleetApp(App):
             width = self.query_one("#fleet", DataTable).size.width
             if width:
                 return width
-        return max(1, int(self.size.width * (100 - self._trace_width_percent) / 100) - 1)
+        return max(
+            1, int(self.size.width * (100 - self._trace_width_percent) / 100) - 1
+        )
 
     def _mode_for_width(self, width: int | None = None) -> str:
         width = self._fleet_width() if width is None else width
@@ -1070,8 +1073,7 @@ class FleetApp(App):
             self.snapshot = snapshot
             self.rows_by_id = {row.identity: row for row in snapshot.rows}
             self._row_repositories = {
-                row.identity: self._repository_for_cwd(row.cwd)
-                for row in snapshot.rows
+                row.identity: self._repository_for_cwd(row.cwd) for row in snapshot.rows
             }
             for repository in self._row_repositories.values():
                 self._repositories_by_key[repository.key] = repository
@@ -1086,7 +1088,8 @@ class FleetApp(App):
                 self.selected_identity != previous
                 or selected is None
                 or selected.log != self._tail_log_path
-                or selected.provider != (self._trace_model.provider if self._trace_model else None)
+                or selected.provider
+                != (self._trace_model.provider if self._trace_model else None)
             ):
                 self._start_selected_tail()
             if not self._initial_refresh_done:
@@ -1140,10 +1143,7 @@ class FleetApp(App):
             self._rebuilding = False
         self._rendered_order = order
         if rebuild:
-            self._rendered_cells = {
-                row.identity: self._row_cells(row)
-                for row in rows
-            }
+            self._rendered_cells = {row.identity: self._row_cells(row) for row in rows}
         if not rows:
             self.query_one("#trace-label", Static).update("TRACE")
             if self.filter_query:
@@ -1170,7 +1170,13 @@ class FleetApp(App):
             return signal, task
         if self._layout_mode == "compact":
             return signal, state, task
-        return signal, state, task, row.model, self._format_elapsed(row.started_at, row.finished_at)
+        return (
+            signal,
+            state,
+            task,
+            row.model,
+            self._format_elapsed(row.started_at, row.finished_at),
+        )
 
     @staticmethod
     def _format_elapsed(started_at: float | None, finished_at: float | None) -> str:
@@ -1345,12 +1351,8 @@ class FleetApp(App):
         repository_rows = self._repository_rows()
         scoped_rows = self._scoped_rows()
         visible_rows = self._visible_rows()
-        repository_status = (
-            f"   REPO {self._repository_label()} {len(repository_rows)}"
-        )
-        scope_status = (
-            f"   {STATE_SCOPE_LABELS[self.state_scope]} {len(scoped_rows)}"
-        )
+        repository_status = f"   REPO {self._repository_label()} {len(repository_rows)}"
+        scope_status = f"   {STATE_SCOPE_LABELS[self.state_scope]} {len(scoped_rows)}"
         filter_status = (
             f"   {len(visible_rows)}/{len(rows)} VISIBLE  ·  /{self.filter_query}"
             if self.filter_query
@@ -1426,11 +1428,7 @@ class FleetApp(App):
             (
                 "s",
                 "stop",
-                bool(
-                    row
-                    and row.tmux_alive
-                    and row.derived in {"working", "queued"}
-                ),
+                bool(row and row.tmux_alive and row.derived in {"working", "queued"}),
             ),
             ("x", "delete", bool(row and row.derived == "finished")),
             ("[", "widen", True),
@@ -1561,7 +1559,9 @@ class FleetApp(App):
         try:
             if os.environ.get("TMUX"):
                 command = ["tmux", "switch-client", "-t", f"={row.key}"]
-                result = subprocess.run(command, capture_output=True, text=True, check=False)
+                result = subprocess.run(
+                    command, capture_output=True, text=True, check=False
+                )
             else:
                 with self.suspend():
                     result = subprocess.run(command, check=False)
@@ -1584,7 +1584,9 @@ class FleetApp(App):
         command = [*command_argv(self.fleet_resume), row.identity]
         try:
             if os.environ.get("TMUX"):
-                result = subprocess.run(command, capture_output=True, text=True, check=False)
+                result = subprocess.run(
+                    command, capture_output=True, text=True, check=False
+                )
                 if result.returncode:
                     detail = result.stderr.strip().splitlines()
                     self._set_notice(
@@ -1620,11 +1622,7 @@ class FleetApp(App):
 
     def action_stop_worker(self) -> None:
         row = self.current_row()
-        if (
-            not row
-            or not row.tmux_alive
-            or row.derived not in {"working", "queued"}
-        ):
+        if not row or not row.tmux_alive or row.derived not in {"working", "queued"}:
             self._set_notice("Stop needs a live worker session", tone="error")
             return
         if self._armed_stop != row.identity:

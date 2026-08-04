@@ -135,8 +135,12 @@ class FleetResumeTest(unittest.TestCase):
     def test_resumed_chat_points_tmux_pane_at_saved_worktree(self):
         completed = mock.Mock(returncode=0)
         with (
-            mock.patch.object(self.resume.shutil, "which", return_value="/usr/bin/tmux"),
-            mock.patch.object(self.resume.subprocess, "run", return_value=completed) as run,
+            mock.patch.object(
+                self.resume.shutil, "which", return_value="/usr/bin/tmux"
+            ),
+            mock.patch.object(
+                self.resume.subprocess, "run", return_value=completed
+            ) as run,
             mock.patch.dict(os.environ, {"TMUX_PANE": "%42"}),
         ):
             self.resume.point_current_tmux_pane("/worktrees/repo/issue-102")
@@ -162,7 +166,11 @@ class FleetResumeTest(unittest.TestCase):
         lock = mock.Mock()
         with (
             mock.patch.object(self.resume, "acquire_chat_lock", return_value=lock),
-            mock.patch.object(self.resume, "interactive_command", return_value=("pi", "--session", "abc")),
+            mock.patch.object(
+                self.resume,
+                "interactive_command",
+                return_value=("pi", "--session", "abc"),
+            ),
             mock.patch.object(self.resume, "point_current_tmux_pane") as point,
             mock.patch.object(self.resume.os, "chdir") as chdir,
             mock.patch.object(self.resume.os, "execvp", side_effect=OSError("stop")),
@@ -181,14 +189,18 @@ class FleetResumeTest(unittest.TestCase):
             mock.patch.object(self.resume, "load_rows", return_value=(row(),)),
             mock.patch.object(self.resume, "chat_lock_active", return_value=False),
             mock.patch.object(self.resume, "tmux_window_exists", return_value=False),
-            mock.patch.object(self.resume.subprocess, "run", return_value=completed) as run,
+            mock.patch.object(
+                self.resume.subprocess, "run", return_value=completed
+            ) as run,
             mock.patch.dict(os.environ, {"TMUX": "/tmp/tmux"}),
             mock.patch("sys.stderr", error),
         ):
             result = self.resume.main(["62"])
         self.assertEqual(result, 0)
         command = run.call_args.args[0]
-        self.assertEqual(command[:5], ("tmux", "new-window", "-n", "chat-task-repo-62", "-c"))
+        self.assertEqual(
+            command[:5], ("tmux", "new-window", "-n", "chat-task-repo-62", "-c")
+        )
         self.assertIn("--hold-lock", command[-1])
 
 

@@ -4,6 +4,7 @@ This module deliberately supports only non-mutating operations: probe, view,
 prompt, and open. Do not add comments/transitions/assignment here without a
 separate workflow design.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,7 +41,9 @@ ESSENTIAL_FIELDS = [
 ]
 DETAIL_FIELDS = ["fixVersions", "versions"]
 CONTENT_FIELDS = ["comment", "attachment", "issuelinks"]
-DEFAULT_FIELDS = ",".join(dict.fromkeys([*ESSENTIAL_FIELDS, *DETAIL_FIELDS, *CONTENT_FIELDS]))
+DEFAULT_FIELDS = ",".join(
+    dict.fromkeys([*ESSENTIAL_FIELDS, *DETAIL_FIELDS, *CONTENT_FIELDS])
+)
 SEARCH_FIELDS = "summary,status,issuetype,project,assignee,priority,updated,resolution"
 SECTIONS = [
     "essentials",
@@ -143,7 +146,11 @@ def auth_headers(args: argparse.Namespace) -> tuple[dict[str, str], str]:
         headers["Authorization"] = os.environ["JIRA_AUTH_HEADER"]
         sources.append("JIRA_AUTH_HEADER")
 
-    if args.keychain_service and args.keychain_account and "Authorization" not in headers:
+    if (
+        args.keychain_service
+        and args.keychain_account
+        and "Authorization" not in headers
+    ):
         services = [args.keychain_service]
         if args.keychain_service == DEFAULT_KEYCHAIN_SERVICE:
             services.append(LEGACY_KEYCHAIN_SERVICE)
@@ -178,7 +185,9 @@ def auth_headers(args: argparse.Namespace) -> tuple[dict[str, str], str]:
     return headers, ", ".join(sources) if sources else "none"
 
 
-def request(method: str, url: str, headers: dict[str, str], body_limit: int | None = 4000) -> HttpResult:
+def request(
+    method: str, url: str, headers: dict[str, str], body_limit: int | None = 4000
+) -> HttpResult:
     req_headers = {
         "Accept": "application/json,text/html;q=0.8,*/*;q=0.5",
         "User-Agent": "eastwatch-jira-board/0.2",
@@ -220,8 +229,12 @@ def request(method: str, url: str, headers: dict[str, str], body_limit: int | No
         )
 
 
-def fetch_issue(base_url: str, key: str, fields: str, headers: dict[str, str]) -> tuple[HttpResult, dict[str, Any] | None]:
-    result = request("GET", issue_rest_url(base_url, key, fields), headers, body_limit=None)
+def fetch_issue(
+    base_url: str, key: str, fields: str, headers: dict[str, str]
+) -> tuple[HttpResult, dict[str, Any] | None]:
+    result = request(
+        "GET", issue_rest_url(base_url, key, fields), headers, body_limit=None
+    )
     if not result.ok:
         return result, None
     try:
@@ -232,8 +245,15 @@ def fetch_issue(base_url: str, key: str, fields: str, headers: dict[str, str]) -
         return result, None
 
 
-def fetch_remote_links(base_url: str, key: str, headers: dict[str, str]) -> tuple[HttpResult, list[dict[str, Any]]]:
-    result = request("GET", rest_url(base_url, f"issue/{urllib.parse.quote(key)}/remotelink"), headers, body_limit=None)
+def fetch_remote_links(
+    base_url: str, key: str, headers: dict[str, str]
+) -> tuple[HttpResult, list[dict[str, Any]]]:
+    result = request(
+        "GET",
+        rest_url(base_url, f"issue/{urllib.parse.quote(key)}/remotelink"),
+        headers,
+        body_limit=None,
+    )
     if not result.ok:
         return result, []
     try:
@@ -254,7 +274,11 @@ def fetch_search(
 ) -> tuple[HttpResult, dict[str, Any] | None]:
     result = request(
         "GET",
-        rest_url(base_url, "search", {"jql": jql, "fields": fields, "maxResults": str(max_results)}),
+        rest_url(
+            base_url,
+            "search",
+            {"jql": jql, "fields": fields, "maxResults": str(max_results)},
+        ),
         headers,
         body_limit=None,
     )
@@ -347,7 +371,9 @@ def display_name(value: Any) -> str:
     if not value:
         return "-"
     if isinstance(value, dict):
-        return str(value.get("displayName") or value.get("name") or value.get("key") or "-")
+        return str(
+            value.get("displayName") or value.get("name") or value.get("key") or "-"
+        )
     return str(value)
 
 
@@ -383,7 +409,9 @@ def format_custom_value(value: Any) -> str:
     if value in (None, [], {}, ""):
         return "None"
     if isinstance(value, list):
-        return ", ".join(format_custom_value(item) for item in value) if value else "None"
+        return (
+            ", ".join(format_custom_value(item) for item in value) if value else "None"
+        )
     if isinstance(value, dict):
         for key in ("value", "name", "displayName", "key", "id"):
             if value.get(key):
@@ -421,7 +449,9 @@ def print_kv(key: str, value: Any) -> None:
     print(f"{key}: {value if value not in (None, '') else '-'}")
 
 
-def render_essentials(issue: dict[str, Any], base: str, key: str, markdown: bool) -> None:
+def render_essentials(
+    issue: dict[str, Any], base: str, key: str, markdown: bool
+) -> None:
     status = field(issue, "status") or {}
     issue_type = field(issue, "issuetype") or {}
     project = field(issue, "project") or {}
@@ -497,21 +527,33 @@ def issue_link_other(link: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return "-", {}
 
 
-def render_links(issue: dict[str, Any], remote_links: list[dict[str, Any]], args: argparse.Namespace) -> None:
+def render_links(
+    issue: dict[str, Any], remote_links: list[dict[str, Any]], args: argparse.Namespace
+) -> None:
     issue_links = field(issue, "issuelinks") or []
     print(f"issue_links_total: {len(issue_links)}")
     for link in issue_links:
         direction, other = issue_link_other(link)
         link_type = (link.get("type") or {}).get("name", "-")
         other_fields = other.get("fields") or {}
-        print(f"- {link_type} {direction} {other.get('key', '-')} — {other_fields.get('summary', '-')}")
+        print(
+            f"- {link_type} {direction} {other.get('key', '-')} — {other_fields.get('summary', '-')}"
+        )
     print(f"remote_links_total: {len(remote_links)}")
-    shown = remote_links if args.remote_link_limit == 0 else remote_links[: args.remote_link_limit]
+    shown = (
+        remote_links
+        if args.remote_link_limit == 0
+        else remote_links[: args.remote_link_limit]
+    )
     for link in shown:
         obj = link.get("object") or {}
-        print(f"- {link.get('relationship') or '-'} {obj.get('title') or '-'} — {obj.get('url') or '-'}")
+        print(
+            f"- {link.get('relationship') or '-'} {obj.get('title') or '-'} — {obj.get('url') or '-'}"
+        )
     if len(shown) < len(remote_links):
-        print(f"... {len(remote_links) - len(shown)} more remote links hidden; use --remote-link-limit 0")
+        print(
+            f"... {len(remote_links) - len(shown)} more remote links hidden; use --remote-link-limit 0"
+        )
 
 
 def linked_issue_keys(issue: dict[str, Any]) -> list[str]:
@@ -585,19 +627,31 @@ def render_development(issue: dict[str, Any], field_id: str | None) -> None:
     for name, item in (cached.get("summary") or {}).items():
         overall = item.get("overall") or {}
         by_instance = item.get("byInstanceType") or {}
-        instances = ", ".join(
-            f"{key}={value.get('count', 0)} ({value.get('name', key)})"
-            for key, value in by_instance.items()
-        ) or "none"
+        instances = (
+            ", ".join(
+                f"{key}={value.get('count', 0)} ({value.get('name', key)})"
+                for key, value in by_instance.items()
+            )
+            or "none"
+        )
         details = []
-        for key in ("count", "state", "openCount", "mergedCount", "declinedCount", "lastUpdated"):
+        for key in (
+            "count",
+            "state",
+            "openCount",
+            "mergedCount",
+            "declinedCount",
+            "lastUpdated",
+        ):
             if key in overall:
                 details.append(f"{key}={overall[key]}")
         nested_details = overall.get("details") or {}
         for key in ("openCount", "mergedCount", "declinedCount", "total"):
             if key in nested_details:
                 details.append(f"{key}={nested_details[key]}")
-        print(f"- {name}: {', '.join(details) if details else 'no overall details'}; instances: {instances}")
+        print(
+            f"- {name}: {', '.join(details) if details else 'no overall details'}; instances: {instances}"
+        )
 
 
 def render_issue(
@@ -673,7 +727,11 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
-def fetch_for_render(args: argparse.Namespace) -> tuple[str, str, dict[str, str], HttpResult, dict[str, Any] | None, list[dict[str, Any]]]:
+def fetch_for_render(
+    args: argparse.Namespace,
+) -> tuple[
+    str, str, dict[str, str], HttpResult, dict[str, Any] | None, list[dict[str, Any]]
+]:
     key = issue_key(args.issue)
     base = normalize_base_url(args.base_url)
     headers, _ = auth_headers(args)
@@ -708,7 +766,9 @@ def cmd_prompt(args: argparse.Namespace) -> int:
         if result.body:
             print("Fetch response:")
             print(textwrap.indent(" ".join(result.body.split())[:500], "  "))
-        print("\nCould not fetch Jira fields. Treat the URL as navigation context only.")
+        print(
+            "\nCould not fetch Jira fields. Treat the URL as navigation context only."
+        )
         return 2
     render_issue(issue, base, key, args, remote_links, markdown=True)
     return 0
@@ -718,7 +778,9 @@ def cmd_attachments(args: argparse.Namespace) -> int:
     key = issue_key(args.issue)
     base = normalize_base_url(args.base_url)
     headers, _ = auth_headers(args)
-    result, issue = fetch_issue(base, key, merge_fields(configured_fields(args), ["attachment"]), headers)
+    result, issue = fetch_issue(
+        base, key, merge_fields(configured_fields(args), ["attachment"]), headers
+    )
     if not issue:
         print("Jira attachments failed")
         print_result("rest GET", result)
@@ -731,7 +793,9 @@ def cmd_download_attachments(args: argparse.Namespace) -> int:
     key = issue_key(args.issue)
     base = normalize_base_url(args.base_url)
     headers, _ = auth_headers(args)
-    result, issue = fetch_issue(base, key, merge_fields(configured_fields(args), ["attachment"]), headers)
+    result, issue = fetch_issue(
+        base, key, merge_fields(configured_fields(args), ["attachment"]), headers
+    )
     if not issue:
         print("Jira attachment download failed")
         print_result("rest GET", result)
@@ -742,9 +806,13 @@ def cmd_download_attachments(args: argparse.Namespace) -> int:
     print(f"out_dir: {out_dir}")
     print(f"total: {len(attachments)}")
     for attachment in attachments:
-        candidate = out_dir / safe_attachment_filename(str(attachment.get("filename") or "attachment"))
+        candidate = out_dir / safe_attachment_filename(
+            str(attachment.get("filename") or "attachment")
+        )
         existed = candidate.exists()
-        path = download_attachment(attachment, out_dir, headers, overwrite=args.overwrite)
+        path = download_attachment(
+            attachment, out_dir, headers, overwrite=args.overwrite
+        )
         status = "present" if existed and not args.overwrite else "saved"
         print(f"- {status}: {path}")
     return 0
@@ -753,7 +821,9 @@ def cmd_download_attachments(args: argparse.Namespace) -> int:
 def cmd_search(args: argparse.Namespace) -> int:
     base = normalize_base_url(args.base_url)
     headers, _ = auth_headers(args)
-    result, payload = fetch_search(base, args.issue, args.search_fields, args.max_results, headers)
+    result, payload = fetch_search(
+        base, args.issue, args.search_fields, args.max_results, headers
+    )
     if payload is None:
         print("Jira search failed")
         print_result("search GET", result)
@@ -765,7 +835,9 @@ def cmd_search(args: argparse.Namespace) -> int:
 
 def cmd_project_open(args: argparse.Namespace) -> int:
     project = args.issue.strip().upper()
-    args.issue = f"project = {project} AND resolution = Unresolved ORDER BY updated DESC"
+    args.issue = (
+        f"project = {project} AND resolution = Unresolved ORDER BY updated DESC"
+    )
     return cmd_search(args)
 
 
@@ -773,7 +845,9 @@ def cmd_linked_open(args: argparse.Namespace) -> int:
     key = issue_key(args.issue)
     base = normalize_base_url(args.base_url)
     headers, _ = auth_headers(args)
-    result, issue = fetch_issue(base, key, merge_fields(configured_fields(args), ["issuelinks"]), headers)
+    result, issue = fetch_issue(
+        base, key, merge_fields(configured_fields(args), ["issuelinks"]), headers
+    )
     if not issue:
         print("Jira linked issue fetch failed")
         print_result("rest GET", result)
@@ -784,8 +858,14 @@ def cmd_linked_open(args: argparse.Namespace) -> int:
     if not keys:
         print("-")
         return 0
-    jql = "key in (" + ",".join(keys) + ") AND resolution = Unresolved ORDER BY updated DESC"
-    result, payload = fetch_search(base, jql, args.search_fields, args.max_results, headers)
+    jql = (
+        "key in ("
+        + ",".join(keys)
+        + ") AND resolution = Unresolved ORDER BY updated DESC"
+    )
+    result, payload = fetch_search(
+        base, jql, args.search_fields, args.max_results, headers
+    )
     if payload is None:
         print("Jira linked-open search failed")
         print_result("search GET", result)
@@ -826,7 +906,9 @@ def parser() -> argparse.ArgumentParser:
         ],
         help="read-only action to run (default: probe)",
     )
-    p.add_argument("issue", help="Jira key/URL, project key for project-open, or JQL for search")
+    p.add_argument(
+        "issue", help="Jira key/URL, project key for project-open, or JQL for search"
+    )
     default_base_url = os.environ.get("JIRA_BASE_URL") or None
     p.add_argument(
         "--base-url",

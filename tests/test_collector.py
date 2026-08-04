@@ -74,7 +74,7 @@ def legacy_projection(lines) -> tuple[str, bool]:
         if len(best_body) > 200 and len(best_body) >= 3 * max(len(last_body), 1):
             best_status = status_re.search(best)
             reply_status = status_re.search(reply)
-            status = (best_status or reply_status)
+            status = best_status or reply_status
             reply = f"{best_body}\n\n{status.group(0).strip()}" if status else best_body
     return reply.strip(), tool_started
 
@@ -106,7 +106,9 @@ class PiStreamCollectorTest(unittest.TestCase):
         self.assertEqual(self.collector.extract_reply(), "complete\nSTATUS: done")
         self.collector.mark_exit(0)
         facts = self.facts()
-        self.assertTrue(all(fact["v"] == 1 and fact["run_id"] == "run-1" for fact in facts))
+        self.assertTrue(
+            all(fact["v"] == 1 and fact["run_id"] == "run-1" for fact in facts)
+        )
         self.assertEqual(
             [fact["type"] for fact in facts],
             ["agent_end", "agent_settled", "guard_armed", "reply_extracted", "exit"],
@@ -147,20 +149,27 @@ class PiStreamCollectorTest(unittest.TestCase):
         )
         self.collector.mark_exit(1)
         self.collector.start_attempt("github-copilot", 1, 1)
-        self.feed_events({
-            "type": "message_update",
-            "assistantMessageEvent": {"type": "text_delta", "delta": "direct answer"},
-        })
+        self.feed_events(
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {
+                    "type": "text_delta",
+                    "delta": "direct answer",
+                },
+            }
+        )
         self.assertEqual(self.collector.reply, "direct answer")
         self.assertTrue(self.collector.tool_started)
         self.assertFalse(self.collector.attempt_tool_started)
 
     def test_delta_ring_overflow_is_bounded_and_marked(self):
         delta = "x" * (DELTA_TAIL_BYTES + 100)
-        self.feed_events({
-            "type": "message_update",
-            "assistantMessageEvent": {"type": "text_delta", "delta": delta},
-        })
+        self.feed_events(
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {"type": "text_delta", "delta": delta},
+            }
+        )
         self.assertEqual(len(self.collector.delta_tail.data), DELTA_TAIL_BYTES)
         self.assertTrue(self.collector.delta_tail.truncated)
         self.collector.extract_reply()
@@ -221,13 +230,15 @@ class PiStreamCollectorTest(unittest.TestCase):
             self.assertIn("message_end", stream.read())
 
     def test_500_mb_spam_keeps_state_bounded(self):
-        payload = event_line({
-            "type": "message_update",
-            "assistantMessageEvent": {
-                "type": "toolcall_delta",
-                "delta": "x" * (1024 * 1024),
-            },
-        })
+        payload = event_line(
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {
+                    "type": "toolcall_delta",
+                    "delta": "x" * (1024 * 1024),
+                },
+            }
+        )
         repetitions = (500 * 1024 * 1024) // len(payload) + 1
         tracemalloc.start()
         try:
@@ -251,7 +262,9 @@ class CorpusDifferentialReplayTest(unittest.TestCase):
         self.assertEqual(len(paths), 19)
         for path in paths:
             with self.subTest(path=path.name):
-                collector = PiStreamCollector(RunJournal(None, "replay"), grace_seconds=20)
+                collector = PiStreamCollector(
+                    RunJournal(None, "replay"), grace_seconds=20
+                )
                 with gzip.open(path, "rb") as stream:
                     for chunk in iter(lambda: stream.read(64 * 1024), b""):
                         collector.feed(chunk)

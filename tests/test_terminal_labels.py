@@ -27,10 +27,16 @@ class FakeForge:
 
     def put(self, path, **data):
         self.puts.append((path, data))
-        self.labels.difference_update(filter(None, data.get("remove_labels", "").split(",")))
+        self.labels.difference_update(
+            filter(None, data.get("remove_labels", "").split(","))
+        )
         for label in filter(None, data.get("add_labels", "").split(",")):
             if self.scoped and label.startswith("agent::"):
-                self.labels = {existing for existing in self.labels if not existing.startswith("agent::")}
+                self.labels = {
+                    existing
+                    for existing in self.labels
+                    if not existing.startswith("agent::")
+                }
             self.labels.add(label)
         return {}
 
@@ -60,7 +66,9 @@ class TerminalLabelTest(unittest.TestCase):
 
     def collect_done(self, forge, *, with_mr):
         conv = self.make_conversation()
-        mr_index = {"27": {"conversation_key": "41", "issue_iid": "41"}} if with_mr else {}
+        mr_index = (
+            {"27": {"conversation_key": "41", "issue_iid": "41"}} if with_mr else {}
+        )
         ps = {"conversations": {"41": conv}, "mr_index": mr_index}
         state = {"projects": {"gitlab.example.com/group/project": ps}}
         with mock.patch.object(watcher, "save_state"):
@@ -147,17 +155,23 @@ class TerminalLabelTest(unittest.TestCase):
                 state = {"projects": {"gitlab.example.com/group/project": ps}}
                 with (
                     mock.patch.object(watcher, "save_state"),
-                    mock.patch.object(watcher, "tmux_bin", return_value="/opt/homebrew/bin/tmux"),
+                    mock.patch.object(
+                        watcher, "tmux_bin", return_value="/opt/homebrew/bin/tmux"
+                    ),
                     mock.patch.object(
                         watcher,
                         "tmux_launch_worker",
-                        return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+                        return_value=SimpleNamespace(
+                            returncode=0, stdout="", stderr=""
+                        ),
                     ) as launch,
                 ):
                     self.assertTrue(watcher.start_one(forge, PROJ, ps, "41", state))
 
                 worker_argv = launch.call_args.args[2]
-                self.assertEqual(worker_argv[1], str(watcher.REPOSITORY_ROOT / "eastwatch"))
+                self.assertEqual(
+                    worker_argv[1], str(watcher.REPOSITORY_ROOT / "eastwatch")
+                )
                 self.assertEqual(worker_argv[-2], "--worker")
                 self.assert_agent_label(forge, watcher.RESEARCHING_LABEL)
 
