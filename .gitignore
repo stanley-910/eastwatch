@@ -1,7 +1,11 @@
 .venv/
-uv.lock
 __pycache__/
 *.py[cod]
+.DS_Store
+.coverage
+htmlcov/
+dist/
+build/
 
 # machine-rendered launchd configuration
 com.stanwang.eastwatch.plist
@@ -9,3 +13,5 @@ com.stanwang.eastwatch.plist
 # transient agent/session state
 .claude/
 .rpiv/
+.pytest_cache/
+.ruff_cache/
