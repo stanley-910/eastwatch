@@ -38,6 +38,7 @@ from eastwatch.collector import (
 )
 from eastwatch.env import getenv
 from eastwatch.paths import REPOSITORY_ROOT
+from eastwatch.sessions import find_claude_session_file
 from eastwatch.vault import (
     VAULT_DISPATCH_INTO,
     VAULT_DONE_STATUSES,
@@ -3607,13 +3608,17 @@ def drain_process(
     timed_out = False
     settled_exit = False
 
-    def discover_pi_session() -> None:
-        if isinstance(collector, PiStreamCollector) and collector.session_id:
+    def discover_provider_session() -> None:
+        if not collector.session_id:
+            return
+        if isinstance(collector, PiStreamCollector):
             collector.discover_session(find_pi_session_file(req, collector.session_id))
+        elif isinstance(collector, ClaudeStreamCollector):
+            collector.discover_session(find_claude_session_file(collector.session_id))
 
     try:
         while open_streams > 0:
-            discover_pi_session()
+            discover_provider_session()
             now = time.time()
             remaining = deadline - now
             if remaining <= 0:
@@ -3679,7 +3684,7 @@ def drain_process(
         close_streams()
         out_pane.close()
         err_pane.close()
-        discover_pi_session()
+        discover_provider_session()
         if timed_out:
             collector.mark_timeout(timeout_seconds)
             write_stderr_tail(req, collector)
@@ -3700,7 +3705,7 @@ def drain_process(
     proc.wait()
     close_streams()
     out_pane.close()
-    discover_pi_session()
+    discover_provider_session()
     err_pane.close()
     code = proc.returncode
     if (
@@ -3852,11 +3857,16 @@ def run_claude_request(req: dict) -> dict:
         except (IndexError, AttributeError) as e:
             raise WorkerCommandError("parse", f"cannot parse claude output: {e}") from e
         reply = result.get("result") or ""
+        # The transcript is only fully written once claude exits, so resolve it
+        # here as well as in the drain loop: this is the path Fleet shows for a
+        # finished row.
+        session_file = find_claude_session_file(result["session_id"])
+        collector.discover_session(session_file)
         return {
             "ok": True,
             "reply": reply,
             "session_id": result["session_id"],
-            "session_file": None,
+            "session_file": session_file,
             "model": req.get("model"),
             "effort": req.get("effort"),
             "pi_provider": None,

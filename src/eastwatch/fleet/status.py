@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 from eastwatch.env import getenv
+from eastwatch.sessions import find_claude_session_file
 
 
 def state_dir() -> Path:
@@ -169,6 +170,40 @@ def summarize_fact(fact: dict) -> str | None:
     if fact_type == "reply_extracted":
         return "reply extracted"
     return None
+
+
+def backfilled_session(conv: dict) -> str:
+    """Resolve a Claude transcript for a run that predates session discovery.
+
+    Runs finished before discovery existed have no `session_discovered` fact
+    and no stored `session_file`, but they do have the session id Claude
+    reported. Resolve from that so old rows are not permanently blank.
+    """
+    if conv.get("provider") != "claude":
+        return ""
+    return find_claude_session_file(conv.get("session_id")) or ""
+
+
+def select_trace(session_path: str, legacy_stream: str, conv: dict) -> tuple[str, str]:
+    """Pick the file Fleet previews, and say where it came from.
+
+    `trace_source` distinguishes the three ways a row can end up with no
+    preview: it was never captured, the provider pruned it, or the row is
+    still too young to have one. A bare empty `log` cannot.
+    """
+    if session_path and Path(session_path).exists():
+        return session_path, "session"
+    if legacy_stream:
+        # Emitted without an existence check, preserving the pre-discovery
+        # contract for raw-capture rows.
+        return legacy_stream, "legacy-stream"
+    if session_path:
+        # Known path, absent file: Claude prunes transcripts on a 30-day
+        # default, so this is expected for old rows rather than a fault.
+        return "", "expired"
+    if conv.get("provider") == "claude" and conv.get("session_id"):
+        return "", "missing"
+    return "", ""
 
 
 def journal_status(path: str | None) -> tuple[str, str]:
@@ -380,8 +415,12 @@ def build_rows() -> list[dict]:
             journal_path = observed_run.get("journal_path") or ""
             journal_line, discovered_session = journal_status(journal_path)
             legacy_stream = observed_run.get("stream_path") or ""
-            pi_session = conv.get("session_file") or discovered_session or ""
-            preview_path = pi_session if conv.get("provider") == "pi" else legacy_stream
+            session_path = (
+                conv.get("session_file")
+                or discovered_session
+                or backfilled_session(conv)
+            )
+            preview_path, trace_source = select_trace(session_path, legacy_stream, conv)
             rows.append(
                 {
                     "identity": f"{project_key}:{conv_key}",
@@ -393,9 +432,10 @@ def build_rows() -> list[dict]:
                     "provider": conv.get("provider") or "",
                     "model_id": conv.get("model") or "",
                     "effort": conv.get("effort") or "",
-                    "session": resume_handle(conv) or pi_session,
+                    "session": resume_handle(conv) or session_path,
                     "tmux_alive": tmux_alive,
                     "log": preview_path,
+                    "trace_source": trace_source,
                     "journal": journal_path,
                     "last_line": journal_line or tail_last_line(legacy_stream),
                     "url": conv.get("issue_url") or conv.get("mr_url") or "",

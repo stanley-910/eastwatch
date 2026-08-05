@@ -149,6 +149,19 @@ class StreamCollector:
         self._reported_oversized_lines = 0
         self._closed = False
         self._terminal_fact: str | None = None
+        self.session_id: str | None = None
+        self._session_files: set[str] = set()
+
+    def discover_session(self, session_file: str | None) -> None:
+        """Journal a provider-native session file the first time we see it.
+
+        Every provider writes its own transcript somewhere; the journal fact is
+        how Fleet later finds it, so this is deliberately provider-agnostic.
+        """
+        if not session_file or session_file in self._session_files:
+            return
+        self._session_files.add(session_file)
+        self.journal.emit("session_discovered", session_file=session_file)
 
     @property
     def stdout_text(self) -> str:
@@ -306,11 +319,9 @@ class PiStreamCollector(StreamCollector):
         self.deadline: float | None = None
         self.outcome: str | None = None
         self.current_provider: str | None = None
-        self.session_id: str | None = None
         self._auth_stdout_overlap = b""
         self._auth_stderr_overlap = b""
         self._reply_journaled = False
-        self._session_files: set[str] = set()
 
     @staticmethod
     def assistant_outcome(message: object) -> str | None:
@@ -353,12 +364,6 @@ class PiStreamCollector(StreamCollector):
             attempt=attempt,
             total=total,
         )
-
-    def discover_session(self, session_file: str | None) -> None:
-        if not session_file or session_file in self._session_files:
-            return
-        self._session_files.add(session_file)
-        self.journal.emit("session_discovered", session_file=session_file)
 
     def cancel_guard(self) -> None:
         self.terminal_agent_end = False
@@ -512,6 +517,13 @@ class ClaudeStreamCollector(StreamCollector):
         self._reply_journaled = False
 
     def consume_event(self, event: dict) -> None:
+        # Claude stamps session_id on the opening system/init event and repeats
+        # it afterwards. Read it off any event that carries one rather than
+        # matching a type: the stream schema is documented as internal, and a
+        # resumed run can move to a fresh id mid-stream.
+        session_id = event.get("session_id")
+        if session_id:
+            self.session_id = str(session_id)
         if event.get("type") == "result":
             self.result_event = event
 
