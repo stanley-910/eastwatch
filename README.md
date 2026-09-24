@@ -1,11 +1,71 @@
 # eastwatch
 
-`eastwatch` turns GitLab issue gestures into detached, resumable `claude` or
-`pi` worker sessions. A launchd job runs one reconciliation cycle about every
-15 seconds, while long-running workers continue in tmux.
+> **Work in progress.** Eastwatch is a personal tool I run every day, shared as
+> is. Config keys, labels, and the hosted mode still change without notice, the
+> local watcher is macOS-only, and hosted mode is an early experiment. Expect
+> rough edges; issues are welcome, but there are no releases or stability
+> guarantees yet.
 
-See [`RUNBOOK.md`](RUNBOOK.md) for the full operating model, state layout, trigger
-semantics, recovery procedures, and troubleshooting.
+A Night's Watch for coding agents. Named after Eastwatch-by-the-Sea from Game of
+Thrones, it turns issue-board actions into resumable AI coding sessions, with a
+TUI to keep watch over the fleet.
+
+![Fleet TUI watching Pi agents work through tasks inside a locked-down workspace container](docs/images/fleet-tui.png)
+
+_The fleet console watching seven Pi agents on a demo project, running
+inside the hardened workspace container from `deploy/workspace/`._
+
+Move an issue into **Ready** (a GitLab label, a GitHub Projects v2 Status, or
+an Obsidian TaskNotes `status:`) and Eastwatch claims it, creates a worktree,
+and launches a detached `claude` or `pi` worker in tmux. When the worker stops
+to ask a question, the issue is parked for you; reply on the issue and the same
+session resumes. Finished work lands as a merge request.
+
+It runs in two shapes:
+
+- **Local**: a launchd job on your Mac runs one reconciliation cycle about
+  every 15 seconds. Workers run in tmux on the same machine.
+- **Hosted (experimental)**: one controller polls the forge and hands jobs to
+  a locked-down Docker workspace per person on a Linux server. See
+  [Hosted mode](#hosted-mode-experimental).
+
+See [`RUNBOOK.md`](RUNBOOK.md) for the full operating model, state layout,
+trigger semantics, recovery procedures, and troubleshooting.
+
+## Quick start (local, macOS)
+
+1. Install [`uv`](https://docs.astral.sh/uv/), `tmux`, and at least one agent
+   CLI (`claude` or `pi`) on the PATH exported by `~/.zshenv`.
+2. Clone and install. This creates `~/.config/eastwatch/config.yaml` from the
+   example and loads the launchd job:
+
+   ```sh
+   git clone https://github.com/stanley-910/eastwatch.git
+   cd eastwatch
+   ./install.sh
+   ```
+
+3. Install the bundled Forge skill where workers and the watcher look for it.
+   Workers use its `glab-board` helper to claim issues, create worktrees, and
+   open merge requests (override the path with `EASTWATCH_GLAB_BOARD`):
+
+   ```sh
+   mkdir -p ~/.agents/skills
+   ln -s "$PWD/deploy/workspace/skills/forge" ~/.agents/skills/forge
+   ```
+
+4. Store the project's bot token in the keychain and fill in the project block
+   in `~/.config/eastwatch/config.yaml` (details in [Install](#install)).
+5. Check the setup without calling any forge API, then open the fleet console:
+
+   ```sh
+   ./eastwatch --preflight
+   ./fleet_tui.py
+   ```
+
+6. Add the `agent::ready` label to an issue (or drag its card to **Ready**).
+   The next cycle adopts existing board state without dispatching, so the
+   first run only starts on a label added after the watcher is up.
 
 ## Repository layout
 
@@ -27,8 +87,8 @@ implementation files by path.
 - [`uv`](https://docs.astral.sh/uv/)
 - `claude` and/or `pi` on the PATH exported by `~/.zshenv`
 - `tmux` for attachable worker sessions (workers can run without it)
-- Forge's `glab-board` command for issue worktree setup and MR completion
-- A GitLab project access token with `api` scope
+- Forge's `glab-board` helper (bundled under `deploy/workspace/skills/forge/`) for issue worktree setup and MR completion
+- A GitLab project access token with `api` scope (GitLab projects only)
 
 ## Model routing
 
@@ -60,6 +120,9 @@ git clone https://github.com/stanley-910/eastwatch.git ~/Developer/eastwatch
 cd ~/Developer/eastwatch
 ./install.sh
 ```
+
+The `com.stanwang.*` launchd label is only a reverse-DNS name for the job;
+nothing is sent anywhere.
 
 The installer creates the config and state directories, seeds
 `~/.config/eastwatch/config.yaml` on first run, renders the tracked
@@ -168,6 +231,9 @@ cd ~/Developer/eastwatch
 ./fleet_tui.py
 ```
 
+Keys: `a` attach, `i` interactive chat, `/` filter, `1`–`5` state scopes,
+`t` theme, `v` trace layout, `f` follow, `?` for the full list.
+
 For scriptable status output:
 
 ```sh
@@ -216,11 +282,35 @@ uv run python -m unittest discover -v
 uv run python -m unittest -v tests.test_pi_parallelism tests.test_fleet_tui
 ```
 
-## Hosted pilot
+## Hosted mode (experimental)
 
-Hosted mode runs one GitLab-polling controller and one persistent Docker workspace per assignee. Ready/Ready-research labels and explicit `@agent` issue comments dispatch work. Each project can select its own project-scoped board-bot token with `bot_token_env`; Git, Pi, and merge requests use the assignee's credentials inside their single workspace.
+Hosted mode runs one forge-polling controller and one persistent Docker
+workspace per assignee on a Linux server. Ready/Ready-research labels and
+explicit `@agent` issue comments dispatch work. Each project can select its own
+project-scoped bot token with `bot_token_env`; Git, Pi, and merge requests use
+the assignee's credentials inside their own workspace.
 
-Hosted mode is explicit through `execution.mode: hosted`. It does not fall back to local execution. Use `bw-admin add-hosted-project --token-stdin` to route another project and token through the existing controller/workspace. See `ONBOARDING.md` for the end-to-end teammate path and `RUNBOOK.md` for operations and cutover.
+Each workspace container runs read-only with all capabilities dropped,
+`no-new-privileges`, a PID limit, and a private `/tmp`. It reaches the
+controller over an `--internal` Docker network and the model proxy over the
+same network; the controller has no Docker socket and publishes no port. The
+isolation stops accidents between teammates, not a hostile admin on the host.
+See [`docs/architecture.md`](docs/architecture.md).
+
+Hosted mode is explicit through `execution.mode: hosted` and never falls back to
+local execution. To set it up:
+
+1. Build the images and start the controller and model proxy on the server
+   ([`RUNBOOK.md`](RUNBOOK.md#start-the-controller)).
+2. Provision a workspace per person with `deploy/host/onboard-workspace.sh`.
+3. On each laptop, run the [`eastwatch-onboarding`](.agents/skills/eastwatch-onboarding/SKILL.md)
+   agent skill. It writes `~/.config/eastwatch/remote.yaml`, checks ssh and the `bw` CLI,
+   and walks through first-issue dispatch.
+
+[`ONBOARDING.md`](ONBOARDING.md) is the end-to-end path and
+[`docs/server-admin.md`](docs/server-admin.md) is the admin crib.
+`bw-admin add-hosted-project --token-stdin` routes another project and token
+through an existing controller and workspace.
 
 Local inspection commands:
 
@@ -232,3 +322,6 @@ Local inspection commands:
 - `bw resume <terminal-run>` for one locked `pi --session` continuation
 - `bw audit <archived-run>` after retention cleanup
 - `bw doctor`
+
+The fleet TUI shows hosted runs next to local ones when
+`~/.config/eastwatch/remote.yaml` is present.

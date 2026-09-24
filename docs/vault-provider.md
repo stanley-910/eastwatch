@@ -74,18 +74,18 @@ the whole note on resume.
 ```yaml
 - forge: vault
   host: local                  # synthetic; state key is `local/<path>`
-  path: garden                 # synthetic ASCII slug (state key, session dir, tmux)
-  vault_path: "~/…/Documents/花园"   # the real (possibly CJK) vault directory
+  path: myvault                # synthetic ASCII slug (state key, session dir, tmux)
+  vault_path: "~/Documents/MyVault"   # the real (possibly CJK) vault directory
   tasks_glob: inbox/tasks/*.md # notes with `tags: task` + a `status:`
-  local_checkout: "~/…/Documents/花园"   # worker cwd = vault (loads AGENTS.md natively)
+  local_checkout: "~/Documents/MyVault"   # worker cwd = vault (loads AGENTS.md natively)
   triggers: [agent::ready]     # only trigger; maps to `status: agent`
   commit_results: true         # watcher commits each note it writes
   default_spec: "claude:sonnet"  # model for notes without their own `model:`
 ```
 
 `host`/`path` are synthetic ASCII on purpose: `path` becomes the state key,
-session-dir slug and tmux session name, so it must stay ASCII even though the
-vault directory is `花园`. A note's own `model:` frontmatter overrides
+session-dir slug and tmux session name, so it must stay ASCII even when the vault
+directory name is not. A note's own `model:` frontmatter overrides
 `default_spec`.
 
 ## Design notes & edge cases

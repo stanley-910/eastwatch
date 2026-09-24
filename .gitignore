@@ -15,3 +15,6 @@ com.stanwang.eastwatch.plist
 .rpiv/
 .pytest_cache/
 .ruff_cache/
+
+# per-machine hosted client config
+config/remote.yaml

@@ -3,6 +3,7 @@ FROM node:22.14.0-bookworm
 
 ARG PI_VERSION=0.80.7
 ARG GLAB_VERSION=1.53.0
+ARG TARGETARCH=amd64
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -10,7 +11,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 RUN npm install --global "@earendil-works/pi-coding-agent@${PI_VERSION}"
 RUN curl --fail --location --silent --show-error \
-      "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/${GLAB_VERSION}/glab_${GLAB_VERSION}_linux_amd64.tar.gz" \
+      "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/${GLAB_VERSION}/glab_${GLAB_VERSION}_linux_${TARGETARCH}.tar.gz" \
       | tar -xz -C /usr/local/bin --strip-components=1 bin/glab
 
 RUN groupmod --new-name bw node \
