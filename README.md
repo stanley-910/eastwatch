@@ -325,3 +325,7 @@ Local inspection commands:
 
 The fleet TUI shows hosted runs next to local ones when
 `~/.config/eastwatch/remote.yaml` is present.
+
+## License
+
+MIT, see [`LICENSE`](LICENSE).

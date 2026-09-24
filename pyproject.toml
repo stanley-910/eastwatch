@@ -7,6 +7,7 @@ name = "eastwatch"
 version = "0.1.0"
 description = "Turn issue-tracker gestures into detached, resumable agent worker sessions."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
   "pyyaml",
