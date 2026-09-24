@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import tempfile
 import time
 import unittest
+from dataclasses import asdict
 from pathlib import Path
 from unittest import mock
 
@@ -18,6 +20,7 @@ from eastwatch.fleet.core import (
     RepositoryIdentity,
     chat_name,
     fetch_snapshot,
+    follow_command_output,
     follow_log_file,
     fuzzy_filter_rows,
     fuzzy_match_rank,
@@ -94,6 +97,29 @@ class FleetRowsTest(unittest.TestCase):
     def test_parse_rejects_non_array_contract(self):
         with self.assertRaisesRegex(ValueError, "array"):
             parse_rows({"rows": []})
+
+    def test_parse_rows_round_trips_hosted_asdict_mapping(self):
+        hosted = row(
+            identity="acme/repo#62",
+            key="acme/repo#62",
+            surface="issue",
+            status="running",
+            derived="working",
+            remote=True,
+            capabilities=("logs", "attach", "resume"),
+            job_id="job-1",
+            owner="alice",
+            last_heartbeat_at=123.0,
+        )
+        payload = json.loads(json.dumps([asdict(hosted)]))
+        parsed = parse_rows(payload)
+        self.assertEqual(len(parsed), 1)
+        result = parsed[0]
+        self.assertTrue(result.remote)
+        self.assertEqual(result.capabilities, ("logs", "attach", "resume"))
+        self.assertEqual(result.job_id, "job-1")
+        self.assertEqual(result.owner, "alice")
+        self.assertEqual(result.last_heartbeat_at, 123.0)
 
     def test_fuzzy_match_is_case_insensitive_and_prefers_substrings(self):
         self.assertEqual(fuzzy_match_rank("Task-Repo-62", "REPO"), (0, 5, 4))
@@ -251,6 +277,11 @@ class FleetLogTest(unittest.TestCase):
             log.feed_line(json.dumps(event))
         self.assertEqual(log.lines, ("two", "three"))
 
+    def test_note_appends_visible_marker_line(self):
+        log = FleetLog("pi")
+        log.note("trace tail failed: exit 255")
+        self.assertEqual(log.lines, ("── trace tail failed: exit 255",))
+
     def test_invalid_or_noise_event_is_ignored(self):
         log = FleetLog("claude")
         self.assertFalse(log.feed_line("not json"))
@@ -297,6 +328,18 @@ class ResumeCommandTest(unittest.TestCase):
         self.assertFalse(resume_eligible(row(session="")))
         with self.assertRaisesRegex(ValueError, "not a resumable"):
             interactive_command(row(derived="working", tmux_alive=True))
+
+    def test_resume_eligible_checks_capability_for_remote_rows(self):
+        self.assertTrue(
+            resume_eligible(
+                row(remote=True, capabilities=("logs", "resume"), session="")
+            )
+        )
+        self.assertFalse(
+            resume_eligible(row(remote=True, capabilities=("logs",), session="abc"))
+        )
+        with self.assertRaisesRegex(ValueError, "hosted"):
+            interactive_command(row(remote=True, capabilities=("resume",)))
 
     def test_tmux_command_quotes_only_nested_shell_command(self):
         command = tmux_chat_command(row())
@@ -484,6 +527,103 @@ class SnapshotAndTailTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await task
             self.assertEqual(seen, ["third", "valid"])
+
+    async def test_follow_command_output_streams_lines_and_kills_on_cancel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "stream.sh"
+            script.write_text(
+                "#!/bin/sh\n"
+                "i=0\n"
+                "while [ $i -lt 100000 ]; do\n"
+                '  echo "line $i"\n'
+                "  i=$((i+1))\n"
+                "  sleep 0.01\n"
+                "done\n"
+            )
+            script.chmod(0o755)
+            seen: list[str] = []
+            enough = asyncio.Event()
+
+            async def collect(line: str) -> None:
+                seen.append(line)
+                if len(seen) == 3:
+                    enough.set()
+
+            task = asyncio.create_task(follow_command_output([str(script)], collect))
+            await asyncio.wait_for(enough.wait(), 2)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertEqual(seen[:3], ["line 0", "line 1", "line 2"])
+
+    async def test_follow_command_output_completes_when_process_exits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "once.sh"
+            script.write_text("#!/bin/sh\necho only\n")
+            script.chmod(0o755)
+            seen: list[str] = []
+
+            async def collect(line: str) -> None:
+                seen.append(line)
+
+            await asyncio.wait_for(follow_command_output([str(script)], collect), 2)
+            self.assertEqual(seen, ["only"])
+
+    async def test_follow_command_output_survives_lines_beyond_64k(self):
+        # asyncio's default readline() limit is 64 KiB; session transcripts
+        # embed whole tool payloads in one JSONL line, which used to kill the
+        # follower with LimitOverrunError and leave the trace pane stalled.
+        script = (
+            "import sys\n"
+            "sys.stdout.write('before\\n')\n"
+            "sys.stdout.write('x' * 300000 + '\\n')\n"
+            "sys.stdout.write('after\\n')\n"
+        )
+        seen: list[str] = []
+
+        async def collect(line: str) -> None:
+            seen.append(line)
+
+        await asyncio.wait_for(
+            follow_command_output([sys.executable, "-c", script], collect), 5
+        )
+        self.assertEqual([len(line) for line in seen], [6, 300000, 5])
+
+    async def test_follow_command_output_detaches_stdin_from_the_terminal(self):
+        # A follower spawned with the app's tty as stdin lets `ssh -t` put
+        # the shared terminal into raw mode and steal keystrokes from the
+        # foreground app (broke the fleet TUI's interactive chat).
+        captured: dict[str, object] = {}
+        real_exec = asyncio.create_subprocess_exec
+
+        async def spy_exec(*argv, **kwargs):
+            captured.update(kwargs)
+            return await real_exec(*argv, **kwargs)
+
+        async def collect(line: str) -> None:
+            pass
+
+        with mock.patch.object(asyncio, "create_subprocess_exec", spy_exec):
+            await asyncio.wait_for(
+                follow_command_output([sys.executable, "-c", "pass"], collect), 5
+            )
+        self.assertEqual(captured.get("stdin"), asyncio.subprocess.DEVNULL)
+
+    async def test_follow_command_output_failure_raises_with_stderr_tail(self):
+        script = "import sys; print('partial'); sys.exit('ssh: broken pipe')"
+
+        seen: list[str] = []
+
+        async def collect(line: str) -> None:
+            seen.append(line)
+
+        with self.assertRaises(RuntimeError) as caught:
+            await asyncio.wait_for(
+                follow_command_output([sys.executable, "-c", script], collect), 5
+            )
+        self.assertEqual(seen, ["partial"])
+        self.assertIn("exited 1", str(caught.exception))
+        self.assertIn("ssh: broken pipe", str(caught.exception))
 
     def test_heartbeat_age_uses_state_mtime(self):
         with tempfile.TemporaryDirectory() as tmp:

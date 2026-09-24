@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
@@ -18,6 +19,7 @@ except ImportError as exc:  # Normal watcher tests do not install optional TUI d
 from eastwatch.fleet.core import RepositoryIdentity
 from eastwatch.fleet.tui import (
     ALL_REPOSITORIES,
+    BW,
     FINISHED_TRACE_GRACE_S,
     FINISHED_TRACE_LINES,
     FLEET_THEMES,
@@ -79,7 +81,15 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
         self.dismiss = self.root / "fleet-dismiss"
         self.dismiss.write_text("#!/bin/sh\nexit 0\n")
         self.dismiss.chmod(0o755)
+        self.hosted_rows_path = self.root / "hosted-rows.json"
+        self.hosted = self.root / "fleet-hosted"
+        self.hosted.write_text(f"#!/bin/sh\n/bin/cat {self.hosted_rows_path}\n")
+        self.hosted.chmod(0o755)
+        self.hosted_fails = self.root / "fleet-hosted-fails"
+        self.hosted_fails.write_text("#!/bin/sh\necho 'boom' 1>&2\nexit 1\n")
+        self.hosted_fails.chmod(0o755)
         self.write_rows()
+        self.write_hosted_rows()
 
     def tearDown(self):
         self.temp.cleanup()
@@ -123,6 +133,33 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
         ]
         self.rows_path.write_text(json.dumps(rows))
 
+    def write_hosted_rows(self, rows=None):
+        if rows is None:
+            rows = [
+                {
+                    "identity": "hosted-62",
+                    "key": "task-issue-62",
+                    "surface": "issue",
+                    "status": "leased",
+                    "derived": "working",
+                    "model": "claude:opus",
+                    "provider": "claude",
+                    "model_id": "opus",
+                    "session": "",
+                    "tmux_alive": False,
+                    "log": "",
+                    "url": "https://gitlab.example/issues/62",
+                    "cwd": "",
+                    "started_at": time.time() - 40,
+                    "job_id": "job-62",
+                    "owner": "alice",
+                    "remote": True,
+                    "capabilities": ["logs", "attach", "resume"],
+                    "last_heartbeat_at": time.time() - 5,
+                },
+            ]
+        self.hosted_rows_path.write_text(json.dumps(rows))
+
     def app(self, **kwargs) -> FleetApp:
         def repository_resolver(cwd: str) -> RepositoryIdentity:
             if cwd.endswith("/alpha"):
@@ -159,6 +196,18 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
             f"running={app._refresh_running}"
         )
 
+    async def wait_trace_contains(self, app: FleetApp, pilot, text: str) -> None:
+        # The tail subprocess is debounced behind row selection, so trace
+        # content lands a beat after the row itself.
+        for _ in range(120):
+            if text in render_text(app.query_one("#trace", TraceView)):
+                return
+            await pilot.pause(0.05)
+        self.fail(
+            f"trace never showed {text!r}: "
+            f"{render_text(app.query_one('#trace', TraceView))!r}"
+        )
+
     async def test_horizontal_layout_loads_rows_and_switches_provider_trace(self):
         app = self.app()
         async with app.run_test(size=(120, 32)) as pilot:
@@ -168,14 +217,12 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(table.row_count, 2)
             self.assertEqual(app._layout_mode, "compact")
             self.assertEqual(app.selected_identity, "parked")
-            self.assertIn(
-                "Need retry ownership", render_text(app.query_one("#trace", TraceView))
-            )
+            await self.wait_trace_contains(app, pilot, "Need retry ownership")
 
             await pilot.press("down")
             await pilot.pause(0.2)
             self.assertEqual(app.selected_identity, "working")
-            self.assertIn("git status", render_text(app.query_one("#trace", TraceView)))
+            await self.wait_trace_contains(app, pilot, "git status")
 
     async def test_vim_keys_move_fleet_cursor(self):
         app = self.app()
@@ -213,7 +260,7 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
                 "1/2 VISIBLE  ·  /71",
                 render_text(app.query_one("#topbar", Static)),
             )
-            self.assertIn("git status", render_text(app.query_one("#trace", TraceView)))
+            await self.wait_trace_contains(app, pilot, "git status")
 
             await pilot.press("enter")
             await pilot.pause()
@@ -449,7 +496,7 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(Chrome.ALLOW_SELECT)
         self.assertFalse(FleetTable.ALLOW_SELECT)
         with mock.patch("eastwatch.fleet.tui.FleetApp.run") as run:
-            main()
+            main(argv=[])
         run.assert_called_once_with(mouse=True)
 
     async def test_copy_uses_macos_clipboard_fallback(self):
@@ -987,6 +1034,307 @@ class FleetTUITest(unittest.IsolatedAsyncioTestCase):
                 "needs a live worker",
                 render_text(app.query_one("#notice", Static)),
             )
+
+    async def test_hosted_rows_merge_with_local_rows_in_table(self):
+        app = self.app(fleet_hosted=self.hosted)
+        async with app.run_test(size=(140, 32)) as pilot:
+            await self.wait_row_count(app, pilot, 3)
+            table = app.query_one("#fleet", DataTable)
+            self.assertEqual(table.row_count, 3)
+            hosted_row = app.rows_by_id["hosted-62@job-62"]
+            self.assertTrue(hosted_row.remote)
+            self.assertIn("@alice", table.get_cell("hosted-62@job-62", "task"))
+            self.assertIn("hb=", table.get_cell("hosted-62@job-62", "task"))
+
+    async def test_repository_filter_scopes_hosted_rows_and_bypasses_local_scope(self):
+        app = self.app(fleet_hosted=self.hosted)
+        async with app.run_test(size=(140, 32)) as pilot:
+            await self.wait_row_count(app, pilot, 3)
+
+            await pilot.press("g")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, RepositorySwitcher)
+            options = app.screen.query_one("#repo-options", OptionList)
+            # All + Cobalt + Orchid + the synthetic Hosted entry.
+            self.assertEqual(options.option_count, 4)
+
+            await pilot.press("j", "j", "j", "enter")
+            await self.wait_row_count(app, pilot, 1)
+            self.assertEqual(app.repository_scope, "hosted")
+            self.assertEqual(app.selected_identity, "hosted-62@job-62")
+
+            await pilot.press("g")
+            await pilot.pause()
+            await pilot.press("k", "k", "enter")
+            await pilot.pause()
+            self.assertEqual(app.repository_scope, "/git/cobalt/.git")
+            # A local repository scope still surfaces hosted rows (they bypass
+            # the local filter), so the cobalt-scoped local row plus the
+            # hosted row are both visible.
+            await self.wait_row_count(app, pilot, 2)
+            visible = {row.identity for row in app._visible_rows()}
+            self.assertEqual(visible, {"working", "hosted-62@job-62"})
+
+    async def test_hosted_row_key_gating_reflects_capabilities(self):
+        self.write_hosted_rows(
+            [
+                {
+                    "identity": "hosted-attach-only",
+                    "key": "task-issue-90",
+                    "surface": "issue",
+                    "status": "leased",
+                    "derived": "working",
+                    "model": "claude:opus",
+                    "provider": "claude",
+                    "model_id": "opus",
+                    "session": "",
+                    "tmux_alive": False,
+                    "log": "",
+                    "url": "",
+                    "cwd": "",
+                    "started_at": time.time() - 10,
+                    "job_id": "job-90",
+                    "owner": "bob",
+                    "remote": True,
+                    "capabilities": ["attach"],
+                    "last_heartbeat_at": time.time() - 2,
+                },
+            ]
+        )
+        app = self.app(fleet_hosted=self.hosted)
+        async with app.run_test(size=(140, 32)) as pilot:
+            await self.wait_row_count(app, pilot, 3)
+            for _ in range(6):
+                if app.selected_identity == "hosted-attach-only@job-90":
+                    break
+                await pilot.press("down")
+                await pilot.pause()
+            self.assertEqual(app.selected_identity, "hosted-attach-only@job-90")
+
+            # Chat is gated off: capabilities has no "resume".
+            await pilot.press("i")
+            await pilot.pause()
+            self.assertIn(
+                "needs a parked, crashed, or finished",
+                render_text(app.query_one("#notice", Static)),
+            )
+
+            # Attach is gated on: capabilities has "attach".
+            completed = mock.Mock(returncode=0, stderr="")
+            with (
+                mock.patch.object(app, "suspend"),
+                mock.patch(
+                    "eastwatch.fleet.tui.subprocess.run", return_value=completed
+                ) as run,
+            ):
+                await pilot.press("a")
+                await pilot.pause(0.1)
+            self.assertEqual(run.call_args.args[0], [*BW, "attach", "job-90"])
+            self.assertIn(
+                "Returned from task-issue-90",
+                render_text(app.query_one("#notice", Static)),
+            )
+
+    async def test_hosted_rows_for_multiple_runs_of_one_issue_render_uniquely(self):
+        base = {
+            "key": "task-issue-62",
+            "surface": "issue",
+            "status": "succeeded",
+            "derived": "finished",
+            "model": "claude:opus",
+            "provider": "claude",
+            "model_id": "opus",
+            "session": "",
+            "tmux_alive": False,
+            "log": "",
+            "url": "https://gitlab.example/issues/62",
+            "cwd": "",
+            "owner": "alice",
+            "remote": True,
+            "capabilities": ["logs"],
+        }
+        self.write_hosted_rows(
+            [
+                {
+                    **base,
+                    "identity": "hosted-62",
+                    "job_id": "job-62a",
+                    "started_at": time.time() - 40,
+                },
+                {
+                    **base,
+                    "identity": "hosted-62",
+                    "job_id": "job-62b",
+                    "started_at": time.time() - 20,
+                },
+            ]
+        )
+        app = self.app(fleet_hosted=self.hosted)
+        async with app.run_test(size=(140, 32)) as pilot:
+            # Two local rows + two hosted runs of the same issue; a shared
+            # issue identity must not collapse or crash the table.
+            await self.wait_row_count(app, pilot, 4)
+            self.assertIn("hosted-62@job-62a", app.rows_by_id)
+            self.assertIn("hosted-62@job-62b", app.rows_by_id)
+
+    async def test_remote_trace_dedupes_replayed_backlog_lines(self):
+        # `bw logs --follow --session` is `tail -F` server-side: every tail
+        # restart replays its backlog. The trace pane must dedupe those
+        # replayed lines instead of rendering them twice.
+        duplicate = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "event A"}]},
+            }
+        )
+        unique = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "event B"}]},
+            }
+        )
+
+        async def fake_follow_command_output(argv, on_line, *, cursor=None):
+            for raw_line in (duplicate, duplicate, unique):
+                await on_line(raw_line)
+
+        app = self.app(fleet_hosted=self.hosted)
+        with mock.patch(
+            "eastwatch.fleet.tui.follow_command_output",
+            fake_follow_command_output,
+        ):
+            async with app.run_test(size=(140, 32)) as pilot:
+                await self.wait_row_count(app, pilot, 3)
+                for _ in range(6):
+                    if app.selected_identity == "hosted-62@job-62":
+                        break
+                    await pilot.press("down")
+                    await pilot.pause()
+                self.assertEqual(app.selected_identity, "hosted-62@job-62")
+
+                for _ in range(40):
+                    if app._trace_model and "event B" in app._trace_model.lines:
+                        break
+                    await pilot.pause(0.05)
+
+                lines = list(app._trace_model.lines)
+                self.assertEqual(lines.count("event A"), 1)
+                self.assertEqual(lines.count("event B"), 1)
+
+    async def test_partial_line_growth_rewrites_tail_without_rebuild(self):
+        # pi's streaming text deltas grow the trace's last line on every
+        # flush; that must pop and rewrite one line, never clear() the log —
+        # full rebuilds per delta froze the TUI on long transcripts.
+        app = self.app()
+        async with app.run_test(size=(100, 24)) as pilot:
+            await self.wait_loaded(app, pilot)
+            trace = app.query_one("#trace", TraceView)
+            trace.show_lines(("→ bash git status", "Hel"), force_end=True)
+            await pilot.pause()
+            with mock.patch.object(trace, "clear", wraps=trace.clear) as tracked_clear:
+                trace.show_lines(("→ bash git status", "Hello wor"))
+                trace.show_lines(("→ bash git status", "Hello world", "── done"))
+                await pilot.pause()
+            tracked_clear.assert_not_called()
+            self.assertEqual(
+                trace.source_lines,
+                ("→ bash git status", "Hello world", "── done"),
+            )
+            rendered = ["".join(seg.text for seg in strip) for strip in trace.lines]
+            self.assertEqual(sum("Hel" in line for line in rendered), 1)
+            self.assertIn("Hello world", "".join(rendered))
+
+    async def test_rebuild_renders_bounded_tail_of_huge_transcripts(self):
+        from eastwatch.fleet.tui import TRACE_RENDER_TAIL_LINES
+
+        app = self.app()
+        async with app.run_test(size=(100, 24)) as pilot:
+            await self.wait_loaded(app, pilot)
+            trace = app.query_one("#trace", TraceView)
+            huge = tuple(f"line {i}" for i in range(TRACE_RENDER_TAIL_LINES + 500))
+            trace.show_lines(huge, force_end=True)
+            await pilot.pause()
+            # The full source is retained for append detection, but only the
+            # tail is rendered.
+            self.assertEqual(trace.source_lines, huge)
+            self.assertLessEqual(len(trace.lines), TRACE_RENDER_TAIL_LINES)
+            rendered = "".join(
+                "".join(seg.text for seg in strip) for strip in trace.lines
+            )
+            self.assertNotIn("line 0 ", rendered + " ")
+            self.assertIn(f"line {len(huge) - 1}", rendered)
+
+            # A subsequent append stays incremental: no rebuild.
+            with mock.patch.object(trace, "clear", wraps=trace.clear) as tracked_clear:
+                trace.show_lines((*huge, "line new"))
+                await pilot.pause()
+            tracked_clear.assert_not_called()
+
+    async def test_row_navigation_debounces_tail_subprocess_spawns(self):
+        spawns: list[str] = []
+
+        async def fake_follow_command_output(argv, on_line, *, cursor=None):
+            spawns.append(" ".join(argv))
+            await asyncio.sleep(3600)
+
+        app = self.app(fleet_hosted=self.hosted)
+        with mock.patch(
+            "eastwatch.fleet.tui.follow_command_output",
+            fake_follow_command_output,
+        ):
+            async with app.run_test(size=(140, 32)) as pilot:
+                await self.wait_row_count(app, pilot, 3)
+                # Walk down and back up quickly: every highlight changes the
+                # selection, but only the row we settle on may spawn a tail.
+                await pilot.press("down", "down", "up", "up")
+                for _ in range(40):
+                    if spawns:
+                        break
+                    await pilot.pause(0.05)
+                await pilot.pause(0.3)
+                hosted_spawns = [argv for argv in spawns if "logs" in argv]
+                self.assertLessEqual(len(hosted_spawns), 1)
+
+    async def test_dead_tail_surfaces_failure_in_trace_pane(self):
+        async def failing_follow_command_output(argv, on_line, *, cursor=None):
+            raise RuntimeError("trace follow exited 255: ssh: connect refused")
+
+        app = self.app(fleet_hosted=self.hosted)
+        with mock.patch(
+            "eastwatch.fleet.tui.follow_command_output",
+            failing_follow_command_output,
+        ):
+            async with app.run_test(size=(140, 32)) as pilot:
+                await self.wait_row_count(app, pilot, 3)
+                for _ in range(6):
+                    if app.selected_identity == "hosted-62@job-62":
+                        break
+                    await pilot.press("down")
+                    await pilot.pause()
+                self.assertEqual(app.selected_identity, "hosted-62@job-62")
+                await self.wait_trace_contains(app, pilot, "trace tail failed")
+                self.assertIn(
+                    "connect refused",
+                    render_text(app.query_one("#trace", TraceView)),
+                )
+
+    async def test_hosted_snapshot_failure_keeps_local_rows_and_sets_notice(self):
+        clock_state = {"now": 1_000.0}
+        app = self.app(fleet_hosted=self.hosted_fails, clock=lambda: clock_state["now"])
+        async with app.run_test(size=(140, 32)) as pilot:
+            await self.wait_row_count(app, pilot, 2)
+
+            # Advance past the rate-limit window and force a second hosted fetch
+            # so its error notice isn't clobbered by the first local refresh's
+            # "Ready" notice. refresh_snapshot is local-only.
+            clock_state["now"] += 61
+            app.refresh_hosted()
+            for _ in range(40):
+                if "Hosted" in render_text(app.query_one("#notice", Static)):
+                    break
+                await pilot.pause(0.05)
+            self.assertIn("Hosted", render_text(app.query_one("#notice", Static)))
+            self.assertEqual(app.query_one("#fleet", DataTable).row_count, 2)
 
 
 if __name__ == "__main__":

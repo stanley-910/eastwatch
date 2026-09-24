@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import argparse
+import asyncio
+import hashlib
 import os
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Sequence
 
 from rich.segment import Segment
 from rich.style import Style
@@ -18,11 +21,13 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
+from textual.geometry import Size
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.selection import Selection
 from textual.strip import Strip
 from textual.theme import Theme
+from textual.timer import Timer
 from textual.widgets import DataTable, Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 
@@ -36,20 +41,32 @@ from eastwatch.fleet.core import (
     RepositoryIdentity,
     command_argv,
     fetch_snapshot,
+    follow_command_output,
     follow_log_file,
     fuzzy_filter_rows,
     preserve_selection,
     resolve_repository,
     resume_eligible,
+    sort_rows,
 )
 from eastwatch.paths import entrypoint_command
 
 FLEET_STATUS = entrypoint_command("eastwatch.fleet.status", "fleet-status")
 FLEET_RESUME = entrypoint_command("eastwatch.fleet.resume", "fleet-resume")
 FLEET_DISMISS = entrypoint_command("eastwatch.fleet.dismiss", "fleet-dismiss")
+BW = entrypoint_command("eastwatch.bw", "bw")
+FLEET_HOSTED = (*BW, "fleet")
+REMOTE_CONFIG_PATH = Path.home() / ".config" / "eastwatch" / "remote.yaml"
+HOSTED_FETCH_TIMEOUT_S = 12.0
+HOSTED_POLL_INTERVAL_S = 6.0
+HOSTED_ERROR_NOTICE_INTERVAL_S = 60.0
 FINISHED_TRACE_GRACE_S = 24 * 60 * 60
 FINISHED_TRACE_LINES = 500
+TRACE_RENDER_TAIL_LINES = 1200
+TRACE_VIEW_MAX_STRIPS = 4000
+TAIL_SPAWN_DEBOUNCE_S = 0.2
 ALL_REPOSITORIES = "*"
+HOSTED_REPOSITORY = "hosted"
 STATE_PATH = (
     Path(getenv("EASTWATCH_STATE_DIR") or str(Path.home() / ".local/state/eastwatch"))
     / "state.json"
@@ -198,6 +215,7 @@ class TraceCacheEntry:
     finished_at: float | None = None
     compacted: bool = False
     pending_events: int = 0
+    seen: set[bytes] = field(default_factory=set)
 
 
 class TraceView(RichLog):
@@ -220,7 +238,7 @@ class TraceView(RichLog):
     ):
         super().__init__(
             id=id,
-            max_lines=None,
+            max_lines=TRACE_VIEW_MAX_STRIPS,
             min_width=1,
             wrap=True,
             auto_scroll=False,
@@ -229,6 +247,7 @@ class TraceView(RichLog):
         self.source_lines: tuple[str, ...] = ()
         self.following = True
         self.unseen_events = 0
+        self._last_line_strips = 0
 
     def _publish_follow_state(self) -> None:
         self.post_message(self.FollowStateChanged(self.following, self.unseen_events))
@@ -288,6 +307,55 @@ class TraceView(RichLog):
         if lines:
             self.show_lines(lines, count_new=False)
 
+    def _line_style(self, line: str) -> str:
+        if line.startswith("→"):
+            return self.palette["glacier"]
+        if line.startswith("·"):
+            return self.palette["muted"]
+        if line.startswith("──"):
+            return self.palette["mint"]
+        return self.palette["fog"]
+
+    def _write_source_line(self, line: str) -> None:
+        before = len(self.lines)
+        self.write(Text(line, style=self._line_style(line)), scroll_end=False)
+        self._last_line_strips = max(0, len(self.lines) - before)
+
+    def _pop_last_source_line(self) -> None:
+        """Remove the strips of the most recently written source line so a
+        grown partial line can be rewritten without rebuilding the log."""
+        if self._last_line_strips <= 0 or not self.lines:
+            return
+        del self.lines[-self._last_line_strips :]
+        self._last_line_strips = 0
+        self._line_cache.clear()
+        self.virtual_size = Size(self._widest_line_width, len(self.lines))
+        self.refresh()
+
+    def _append_start(self, lines: tuple[str, ...]) -> int | None:
+        """Index to append from, or None when a rebuild is required.
+
+        Fast paths: pure append (shared prefix), and the streaming-delta case
+        where only the final shown line grew — that line's strips are popped
+        and rewritten in place instead of clearing the whole log.
+        """
+        shown = self.source_lines
+        if len(lines) < len(shown):
+            return None
+        if not shown:
+            return None
+        head = len(shown) - 1
+        if lines[:head] != shown[:head]:
+            return None
+        if lines[head] == shown[head]:
+            return len(shown)
+        if lines[head].startswith(shown[head]) and self._size_known:
+            # Writes are deferred until the widget has a size; popping strips
+            # only makes sense once lines are actually rendered.
+            self._pop_last_source_line()
+            return head
+        return None
+
     def show_lines(
         self,
         lines: Iterable[str],
@@ -298,28 +366,19 @@ class TraceView(RichLog):
     ) -> None:
         lines = tuple(lines)
         previous_scroll_y = self.scroll_y
-        append_from = (
-            len(self.source_lines)
-            if len(lines) >= len(self.source_lines)
-            and lines[: len(self.source_lines)] == self.source_lines
-            else None
-        )
-        appended = len(lines) - append_from if append_from is not None else 0
+        append_from = self._append_start(lines)
+        appended = len(lines) - len(self.source_lines) if append_from is not None else 0
         rebuilt = append_from is None
         if force_end:
             self.set_following(True)
         if append_from is None:
             self.clear()
-            append_from = 0
+            self._last_line_strips = 0
+            # A rebuild renders a bounded tail: the trace pane is a viewport,
+            # and unbounded rewrites are what made row switches freeze.
+            append_from = max(0, len(lines) - TRACE_RENDER_TAIL_LINES)
         for line in lines[append_from:]:
-            style = self.palette["fog"]
-            if line.startswith("→"):
-                style = self.palette["glacier"]
-            elif line.startswith("·"):
-                style = self.palette["muted"]
-            elif line.startswith("──"):
-                style = self.palette["mint"]
-            self.write(Text(line, style=style), scroll_end=False)
+            self._write_source_line(line)
         self.source_lines = lines
         unseen = appended if new_events is None else new_events
         if not self.following and count_new and unseen:
@@ -746,6 +805,7 @@ class FleetApp(App):
         fleet_status: Command = FLEET_STATUS,
         fleet_resume: Command = FLEET_RESUME,
         fleet_dismiss: Command = FLEET_DISMISS,
+        fleet_hosted: Command | None = None,
         state_path: Path = STATE_PATH,
         poll_interval_s: float = 2.0,
         repository_resolver: Callable[[str], RepositoryIdentity] = resolve_repository,
@@ -758,11 +818,16 @@ class FleetApp(App):
         self.fleet_status = fleet_status
         self.fleet_resume = fleet_resume
         self.fleet_dismiss = fleet_dismiss
+        self.fleet_hosted = fleet_hosted
         self.state_path = state_path
         self.poll_interval_s = poll_interval_s
         self.repository_resolver = repository_resolver
         self.clock = clock
         self.snapshot = FleetSnapshot((), time.time(), None)
+        self._local_rows: tuple[FleetRow, ...] = ()
+        self._hosted_rows: tuple[FleetRow, ...] = ()
+        self._hosted_refresh_running = False
+        self._hosted_error_notified_at: float = float("-inf")
         self.rows_by_id: dict[str, FleetRow] = {}
         self.selected_identity: str | None = None
         self.filter_query = ""
@@ -782,11 +847,13 @@ class FleetApp(App):
         self._rendered_cells: dict[str, tuple[object, ...]] = {}
         self._tail_identity: str | None = None
         self._tail_log_path: str | None = None
+        self._tail_session: str | None = None
         self._trace_model: FleetLog | None = None
         self._trace_cursor: LogCursor | None = None
         self._trace_entry: TraceCacheEntry | None = None
         self._trace_cache: dict[tuple[str, str, str], TraceCacheEntry] = {}
         self._trace_render_pending = False
+        self._tail_spawn_timer: Timer | None = None
         self._notice_generation = 0
         self._initial_refresh_done = False
         self._refresh_running = False
@@ -818,6 +885,9 @@ class FleetApp(App):
         self.query_one("#fleet", DataTable).focus()
         self.refresh_snapshot()
         self.set_interval(self.poll_interval_s, self.refresh_snapshot)
+        if self.fleet_hosted is not None:
+            self.refresh_hosted()
+            self.set_interval(HOSTED_POLL_INTERVAL_S, self.refresh_hosted)
 
     def on_unmount(self) -> None:
         self._notice_generation += 1
@@ -828,6 +898,7 @@ class FleetApp(App):
         self._trace_cursor = None
         self._trace_entry = None
         self._trace_render_pending = False
+        self._cancel_tail_spawn_timer()
         self.workers.cancel_group(self, "tail")
         self.workers.cancel_group(self, "snapshot")
 
@@ -897,13 +968,18 @@ class FleetApp(App):
         return repository
 
     def _repository_rows(self) -> tuple[FleetRow, ...]:
+        if self.repository_scope == HOSTED_REPOSITORY:
+            return tuple(row for row in self.snapshot.rows if row.remote)
         if self.repository_scope == ALL_REPOSITORIES:
             return self.snapshot.rows
         return tuple(
             row
             for row in self.snapshot.rows
-            if (repository := self._row_repositories.get(row.identity)) is not None
-            and repository.key == self.repository_scope
+            if row.remote
+            or (
+                (repository := self._row_repositories.get(row.identity)) is not None
+                and repository.key == self.repository_scope
+            )
         )
 
     def _scoped_rows(self) -> tuple[FleetRow, ...]:
@@ -929,6 +1005,8 @@ class FleetApp(App):
         key = self.repository_scope if key is None else key
         if key == ALL_REPOSITORIES:
             return "All"
+        if key == HOSTED_REPOSITORY:
+            return "Hosted"
         repository = self._repositories_by_key.get(key)
         return repository.label if repository is not None else "Unknown"
 
@@ -936,20 +1014,30 @@ class FleetApp(App):
         counts: dict[str, int] = {}
         for repository in self._row_repositories.values():
             counts[repository.key] = counts.get(repository.key, 0) + 1
-        if self.repository_scope != ALL_REPOSITORIES:
+        if self.repository_scope not in (ALL_REPOSITORIES, HOSTED_REPOSITORY):
             counts.setdefault(self.repository_scope, 0)
         repositories = (
             self._repositories_by_key[key]
             for key in counts
             if key in self._repositories_by_key
         )
-        return tuple(
+        choices = list(
             (repository, counts[repository.key])
             for repository in sorted(
                 repositories,
                 key=lambda item: (item.label.casefold(), item.key),
             )
         )
+        hosted_count = sum(1 for row in self.snapshot.rows if row.remote)
+        if (
+            hosted_count
+            or self.fleet_hosted is not None
+            or self.repository_scope == HOSTED_REPOSITORY
+        ):
+            choices.append(
+                (RepositoryIdentity(HOSTED_REPOSITORY, "Hosted"), hosted_count)
+            )
+        return tuple(choices)
 
     def _apply_row_filters(self) -> None:
         previous = self.selected_identity
@@ -1055,48 +1143,101 @@ class FleetApp(App):
             self._refresh_running = False
 
     async def _refresh_snapshot_once(self) -> None:
-        snapshot = await fetch_snapshot(
+        # Local-only: the hosted fetch rides its own slower worker
+        # (refresh_hosted) so a slow ssh round-trip never gates table updates.
+        local_snapshot = await fetch_snapshot(
             self.fleet_status,
             timeout_s=6.0,
             state_path=self.state_path,
         )
-        if snapshot.error:
-            self.snapshot = FleetSnapshot(
-                self.snapshot.rows,
-                self.snapshot.refreshed_at,
-                snapshot.heartbeat_age_s,
-                snapshot.error,
+        if not local_snapshot.error:
+            self._local_rows = local_snapshot.rows
+        self._merge_and_render(local_snapshot)
+        if local_snapshot.error:
+            self._set_notice(local_snapshot.error, tone="error", timeout_s=5)
+        elif not self._initial_refresh_done:
+            self._set_notice("Ready", timeout_s=0)
+            self._initial_refresh_done = True
+
+    @work(group="hosted-snapshot")
+    async def refresh_hosted(self) -> None:
+        if self.fleet_hosted is None or self._hosted_refresh_running:
+            return
+        self._hosted_refresh_running = True
+        try:
+            hosted_snapshot = await fetch_snapshot(
+                self.fleet_hosted,
+                timeout_s=HOSTED_FETCH_TIMEOUT_S,
             )
-            self._set_notice(snapshot.error, tone="error", timeout_s=5)
+            if hosted_snapshot.error:
+                self._note_hosted_error(hosted_snapshot.error)
+                return
+            # Hosted identities are per-issue but bw fleet returns one row
+            # per run; the DataTable keys rows by identity, so make each
+            # hosted row's identity unique per run.
+            self._hosted_rows = tuple(
+                replace(row, identity=f"{row.identity}@{row.run_id or row.job_id}")
+                if row.run_id or row.job_id
+                else row
+                for row in hosted_snapshot.rows
+            )
+            self._merge_and_render(None)
+        finally:
+            self._hosted_refresh_running = False
+
+    def _merge_and_render(self, local_snapshot: FleetSnapshot | None) -> None:
+        previous = self.selected_identity
+        merged_rows = sort_rows((*self._local_rows, *self._hosted_rows))
+        if local_snapshot is None:
+            reference = self.snapshot
         else:
-            previous = self.selected_identity
-            self.snapshot = snapshot
-            self.rows_by_id = {row.identity: row for row in snapshot.rows}
-            self._row_repositories = {
-                row.identity: self._repository_for_cwd(row.cwd) for row in snapshot.rows
-            }
-            for repository in self._row_repositories.values():
-                self._repositories_by_key[repository.key] = repository
-            for row in snapshot.rows:
-                entry = self._trace_cache.get((row.identity, row.log, row.provider))
-                if entry is not None:
-                    self._apply_trace_retention(row, entry)
-            self.selected_identity = preserve_selection(self._visible_rows(), previous)
-            self._render_rows()
-            selected = self.current_row()
-            if (
-                self.selected_identity != previous
-                or selected is None
-                or selected.log != self._tail_log_path
-                or selected.provider
-                != (self._trace_model.provider if self._trace_model else None)
-            ):
-                self._start_selected_tail()
-            if not self._initial_refresh_done:
-                self._set_notice("Ready", timeout_s=0)
-                self._initial_refresh_done = True
+            reference = FleetSnapshot(
+                (),
+                self.snapshot.refreshed_at
+                if local_snapshot.error
+                else local_snapshot.refreshed_at,
+                local_snapshot.heartbeat_age_s,
+                local_snapshot.error,
+            )
+        self.snapshot = FleetSnapshot(
+            merged_rows,
+            reference.refreshed_at,
+            reference.heartbeat_age_s,
+            reference.error,
+        )
+        self.rows_by_id = {row.identity: row for row in merged_rows}
+        self._row_repositories = {
+            row.identity: self._repository_for_cwd(row.cwd)
+            for row in merged_rows
+            if not row.remote
+        }
+        for repository in self._row_repositories.values():
+            self._repositories_by_key[repository.key] = repository
+        for row in merged_rows:
+            entry = self._trace_cache.get((row.identity, row.log, row.provider))
+            if entry is not None:
+                self._apply_trace_retention(row, entry)
+        self.selected_identity = preserve_selection(self._visible_rows(), previous)
+        self._render_rows()
+        selected = self.current_row()
+        if (
+            self.selected_identity != previous
+            or selected is None
+            or selected.log != self._tail_log_path
+            or selected.provider
+            != (self._trace_model.provider if self._trace_model else None)
+            or (selected.session or "") != (getattr(self, "_tail_session", "") or "")
+        ):
+            self._start_selected_tail()
         self._render_header()
         self._render_keys()
+
+    def _note_hosted_error(self, error: str) -> None:
+        now = self.clock()
+        if now - self._hosted_error_notified_at < HOSTED_ERROR_NOTICE_INTERVAL_S:
+            return
+        self._hosted_error_notified_at = now
+        self._set_notice(f"Hosted fleet · {error}", tone="error", timeout_s=5)
 
     def _column_keys(self) -> tuple[str, ...]:
         if self._layout_mode == "tiny":
@@ -1166,6 +1307,15 @@ class FleetApp(App):
         signal = Text(symbol, style=f"bold {color}")
         state = Text(row.derived.upper(), style=color)
         task = row.key.removeprefix("task-")
+        if row.remote:
+            if row.owner:
+                task += f" @{row.owner}"
+            if (
+                row.status in ("leased", "running")
+                and row.last_heartbeat_at is not None
+            ):
+                age = max(0, round(self.clock() - row.last_heartbeat_at))
+                task += f" hb={age}s"
         if self._layout_mode == "tiny":
             return signal, task
         if self._layout_mode == "compact":
@@ -1211,13 +1361,16 @@ class FleetApp(App):
         if not row:
             self._tail_identity = None
             self._tail_log_path = None
+            self._tail_session = None
             self._trace_model = None
             self._trace_cursor = None
             self._trace_entry = None
+            self._cancel_tail_spawn_timer()
             self.workers.cancel_group(self, "tail")
             return
         self._tail_identity = row.identity
         self._tail_log_path = row.log
+        self._tail_session = row.session
         cache_key = (row.identity, row.log, row.provider)
         entry = self._trace_cache.get(cache_key)
         if entry is None:
@@ -1234,11 +1387,13 @@ class FleetApp(App):
         self._trace_render_pending = False
         self.query_one("#trace", TraceView).set_following(True)
         self._render_trace_label(row)
-        if not row.log:
+        has_trace = ("logs" in row.capabilities) if row.remote else bool(row.log)
+        if not has_trace:
             self.query_one("#trace", TraceView).show_lines(
                 ("No retained run trace for this conversation.",),
                 force_end=True,
             )
+            self._cancel_tail_spawn_timer()
             self.workers.cancel_group(self, "tail")
             return
         lines = entry.model.lines
@@ -1246,6 +1401,31 @@ class FleetApp(App):
             lines or ("Loading trace…",),
             force_end=True,
         )
+        # Cached content is on screen already; defer the tail subprocess so
+        # holding j/k across rows doesn't fork a bw/ssh chain per keypress.
+        self.workers.cancel_group(self, "tail")
+        self._cancel_tail_spawn_timer()
+        self._tail_spawn_timer = self.set_timer(
+            TAIL_SPAWN_DEBOUNCE_S,
+            self._spawn_selected_tail,
+        )
+
+    def _cancel_tail_spawn_timer(self) -> None:
+        timer, self._tail_spawn_timer = self._tail_spawn_timer, None
+        if timer is not None:
+            timer.stop()
+
+    def _spawn_selected_tail(self) -> None:
+        self._tail_spawn_timer = None
+        row = self.current_row()
+        entry = self._trace_entry
+        if (
+            row is None
+            or entry is None
+            or row.identity != self._tail_identity
+            or entry.model is not self._trace_model
+        ):
+            return
         self.follow_selected_log(row, entry)
 
     @work(exclusive=True, group="tail")
@@ -1255,16 +1435,40 @@ class FleetApp(App):
         async def consume(raw_line: str) -> None:
             if row.identity != self._tail_identity or model is not self._trace_model:
                 return
+            if row.remote:
+                digest = hashlib.blake2s(raw_line.encode("utf-8", "replace")).digest()
+                if digest in entry.seen:
+                    return
+                entry.seen.add(digest)
             if model.feed_line(raw_line):
                 entry.pending_events += 1
                 self._schedule_trace_render()
 
-        await follow_log_file(
-            Path(row.log),
-            consume,
-            initial_bytes=None,
-            cursor=entry.cursor,
-        )
+        try:
+            if row.remote:
+                argv = [*BW, "logs", row.job_id, "--follow"]
+                if row.session:
+                    # Trace the pi session transcript (the conversation), not
+                    # the worker lifecycle journal.
+                    argv.append("--session")
+                await follow_command_output(argv, consume, cursor=entry.cursor)
+                notice = "trace tail ended — reselect the row to retry"
+            else:
+                await follow_log_file(
+                    Path(row.log),
+                    consume,
+                    initial_bytes=None,
+                    cursor=entry.cursor,
+                )
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # a dead tail must be visible, not a stall
+            notice = f"trace tail failed: {error}"
+        if row.identity == self._tail_identity and model is self._trace_model:
+            model.note(notice)
+            entry.pending_events += 1
+            self._schedule_trace_render()
 
     def _apply_trace_retention(
         self,
@@ -1401,7 +1605,14 @@ class FleetApp(App):
         row = self.current_row()
         compact = self.size.width < 120
         actions = [
-            ("a", "attach", bool(row and row.tmux_alive)),
+            (
+                "a",
+                "attach",
+                bool(
+                    row
+                    and ("attach" in row.capabilities if row.remote else row.tmux_alive)
+                ),
+            ),
             ("i", "chat", bool(row and resume_eligible(row))),
             ("o", "open", bool(row and row.url)),
             ("r", "refresh", True),
@@ -1428,7 +1639,12 @@ class FleetApp(App):
             (
                 "s",
                 "stop",
-                bool(row and row.tmux_alive and row.derived in {"working", "queued"}),
+                bool(
+                    row
+                    and not row.remote
+                    and row.tmux_alive
+                    and row.derived in {"working", "queued"}
+                ),
             ),
             ("x", "delete", bool(row and row.derived == "finished")),
             ("[", "widen", True),
@@ -1552,26 +1768,44 @@ class FleetApp(App):
 
     def action_attach(self) -> None:
         row = self.current_row()
+        if row and row.remote:
+            if "attach" not in row.capabilities:
+                self._set_notice("Attach needs a live worker session", tone="error")
+                return
+            self._run_attach_command([*BW, "attach", row.job_id], row.key)
+            return
         if not row or not row.tmux_alive:
             self._set_notice("Attach needs a live worker session", tone="error")
             return
-        command = ["tmux", "attach-session", "-t", f"={row.key}"]
-        try:
-            if os.environ.get("TMUX"):
-                command = ["tmux", "switch-client", "-t", f"={row.key}"]
+        if os.environ.get("TMUX"):
+            command = ["tmux", "switch-client", "-t", f"={row.key}"]
+            try:
                 result = subprocess.run(
                     command, capture_output=True, text=True, check=False
                 )
+            except OSError as exc:
+                self._set_notice(f"Could not run tmux: {exc}", tone="error")
+                return
+            if result.returncode:
+                self._set_notice(f"Could not attach {row.key}", tone="error")
             else:
-                with self.suspend():
-                    result = subprocess.run(command, check=False)
+                self._set_notice(f"Returned from {row.key}")
+            return
+        self._run_attach_command(
+            ["tmux", "attach-session", "-t", f"={row.key}"], row.key
+        )
+
+    def _run_attach_command(self, command: list[str], key: str) -> None:
+        try:
+            with self.suspend():
+                result = subprocess.run(command, check=False)
         except OSError as exc:
             self._set_notice(f"Could not run tmux: {exc}", tone="error")
             return
         if result.returncode:
-            self._set_notice(f"Could not attach {row.key}", tone="error")
+            self._set_notice(f"Could not attach {key}", tone="error")
         else:
-            self._set_notice(f"Returned from {row.key}")
+            self._set_notice(f"Returned from {key}")
 
     def action_chat(self) -> None:
         row = self.current_row()
@@ -1581,9 +1815,12 @@ class FleetApp(App):
                 tone="error",
             )
             return
-        command = [*command_argv(self.fleet_resume), row.identity]
+        if row.remote:
+            command = [*BW, "resume", row.job_id]
+        else:
+            command = [*command_argv(self.fleet_resume), row.identity]
         try:
-            if os.environ.get("TMUX"):
+            if os.environ.get("TMUX") and not row.remote:
                 result = subprocess.run(
                     command, capture_output=True, text=True, check=False
                 )
@@ -1622,6 +1859,9 @@ class FleetApp(App):
 
     def action_stop_worker(self) -> None:
         row = self.current_row()
+        if row and row.remote:
+            self._set_notice("stop is not available for hosted runs yet", tone="error")
+            return
         if not row or not row.tmux_alive or row.derived not in {"working", "queued"}:
             self._set_notice("Stop needs a live worker session", tone="error")
             return
@@ -1713,8 +1953,18 @@ class FleetApp(App):
         )
 
 
-def main() -> None:
-    FleetApp().run(mouse=True)
+def main(argv: Sequence[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="fleet-tui")
+    parser.add_argument(
+        "--no-hosted",
+        action="store_true",
+        help="Disable hosted run polling even when remote.yaml is configured",
+    )
+    args = parser.parse_args(argv)
+    fleet_hosted = None
+    if not args.no_hosted and REMOTE_CONFIG_PATH.is_file():
+        fleet_hosted = FLEET_HOSTED
+    FleetApp(fleet_hosted=fleet_hosted).run(mouse=True)
 
 
 if __name__ == "__main__":

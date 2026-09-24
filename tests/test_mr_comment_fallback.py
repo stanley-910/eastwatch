@@ -458,7 +458,7 @@ class MRCommentFallbackTest(unittest.TestCase):
                 "projects/1/events": [
                     {
                         "id": 301,
-                        "author": {"id": 1, "username": "stanwang"},
+                        "author": {"id": 1, "username": "maintainer"},
                         "note": {
                             "id": 501,
                             "noteable_type": "Issue",
@@ -468,7 +468,7 @@ class MRCommentFallbackTest(unittest.TestCase):
                     },
                     {
                         "id": 302,
-                        "author": {"id": 1, "username": "stanwang"},
+                        "author": {"id": 1, "username": "maintainer"},
                         "note": {
                             "id": 601,
                             "noteable_type": "MergeRequest",
@@ -478,7 +478,7 @@ class MRCommentFallbackTest(unittest.TestCase):
                     },
                     {
                         "id": 303,
-                        "author": {"id": 1, "username": "stanwang"},
+                        "author": {"id": 1, "username": "maintainer"},
                         "note": {
                             "id": 502,
                             "noteable_type": "Issue",
@@ -511,7 +511,7 @@ class MRCommentFallbackTest(unittest.TestCase):
         )
         ps = {"bootstrapped": True, "last_event_id": 0}
 
-        gestures = watcher.poll_comments(gl, proj, ps, "stanwang")
+        gestures = watcher.poll_comments(gl, proj, ps, "maintainer")
 
         self.assertEqual(gestures[0]["discussion_id"], "issue-discussion")
         self.assertEqual(gestures[1]["discussion_id"], "mr-discussion")
@@ -528,7 +528,7 @@ class MRCommentFallbackTest(unittest.TestCase):
                 "projects/1/events": [
                     {
                         "id": 301,
-                        "author": {"id": 1, "username": "stanwang"},
+                        "author": {"id": 1, "username": "maintainer"},
                         "note": {
                             "id": 501,
                             "noteable_type": "Issue",
@@ -543,7 +543,7 @@ class MRCommentFallbackTest(unittest.TestCase):
         )
         ps = {"bootstrapped": True, "last_event_id": 300}
 
-        gestures = watcher.poll_comments(gl, PROJ, ps, "stanwang")
+        gestures = watcher.poll_comments(gl, PROJ, ps, "maintainer")
 
         self.assertEqual(ps["last_event_id"], 301)
         self.assertEqual(len(gestures), 1)
@@ -586,7 +586,7 @@ class MRCommentFallbackTest(unittest.TestCase):
         }
 
         watcher.assemble(
-            gl, PROJ, ps, [gesture], [], set(), "stanwang", DEFAULTS, ["mention"]
+            gl, PROJ, ps, [gesture], [], set(), "maintainer", DEFAULTS, ["mention"]
         )
         self.assertEqual(
             conv["next_reply_target"],

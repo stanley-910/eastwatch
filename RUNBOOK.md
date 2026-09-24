@@ -7,6 +7,8 @@ exits. Long-running `claude`/`pi` sessions run in detached worker-wrapper
 processes; replies are posted back to the issue by a later reconcile cycle as
 comments authored by the project bot.
 
+## Local mode
+
 ## Install / start
 
 ```sh
@@ -125,17 +127,19 @@ after a conversation completes.
 
 ## Adding a repo
 
-1. Create a project access token (Developer, `api` scope) on the new project;
-   note its bot username/user-id (`GET /user` with that token).
-2. Either reuse the same keychain item (one token can't span projects — so
-   usually: add a second keychain item and a second `keychain:`-style entry is NOT
-   supported in v1; simplest is one watcher config per token-compatible project
-   group) — v1 assumes all configured projects accept the one keychain token.
+1. Create a project access token (Developer, `api` scope) on the new project.
+2. For local mode, store it in a project-specific keychain entry. For hosted
+   mode, use `bw-admin add-hosted-project` below; hosted controllers route each
+   project through its own `bot_token_env` while retaining one controller,
+   database, Fleet endpoint, and workspace per user.
 3. Append the project to `projects:` in `~/.config/eastwatch/config.yaml`
    (host, path, numeric id, bot username/id, triggers, `local_checkout`,
    optional `worker_briefing`).
-4. Create the labels on the project: `agent::ready`, `agent::ready-research`,
-   `agent::for-human`, `agent::working`, `agent::parked`.
+4. Bootstrap the labels AND board lanes with `glab-board setup` (the forge
+   skill's script), run from a checkout of the target repo — it is idempotent
+   and creates the full `agent::*`/`triage::*` label set plus the matching
+   board lists, so the project board reads as lanes from day one. Only fall
+   back to hand-creating labels when no checkout with forge auth exists yet.
    Project access tokens are per-project: mint one for the new repo, store it
    under its own keychain entry, and set `keychain: {service, account}` in the
    project block.
@@ -554,3 +558,133 @@ token in config, logs, or the repo.
   Pi's `/login` flow. Then have the external service operator restart Headroom
   so it consumes the renewed login; do not restart eastwatch.
 - State is authoritative over labels; if labels drift, fix state or just re-trigger.
+
+## Hosted pilot trust model
+
+The pilot prevents accidental collisions, not hostile access. Teammates share one admin SSH identity and passwordless sudo. Containers have separate homes and credentials but are not a security boundary against another teammate. The controller has no Docker socket or workspace mount.
+
+## Start the controller
+
+1. Run `sudo deploy/host/install-helper.sh <checkout>` to install the host-side `bw`/`bw-admin` venv.
+2. Build `deploy/controller/Dockerfile` and `deploy/workspace/Dockerfile` on `eastwatch-host`.
+3. Place hosted `config.yaml` and a root-owned mode-0600 `controller.env` under `/srv/eastwatch/controller`. The env may contain one token variable per project; each project selects its variable with `bot_token_env`.
+4. Run `deploy/controller/run.sh`.
+5. Confirm the controller joins `bw-internal` and its private `bw-controller-egress`; confirm it publishes no port and mounts no Docker socket. `bw-internal` must be created with `--internal` or runner containers silently gain internet egress via NAT.
+6. Alias health checks must use a real HTTP request, not `nslookup`/`getent` — a host DNS search-domain wildcard shadows bare container aliases for tools that do not honor `ndots:0`.
+
+## Provision a teammate
+
+Run one script from the checkout:
+
+```
+deploy/host/onboard-workspace.sh <id> <gitlab-user> <gitlab-user-id> \
+    --projects '[{"host":"...","path":"group/repo"}]' \
+    [--default-spec pi:gpt-5.6-sol:medium] [--allowed-spec SPEC]...
+```
+
+It does three things in order, echoing each step:
+
+1. `docker build`s the workspace image from the checkout — this bakes the
+   Forge skill and the pi models template into the image, killing the
+   stale-image papercut (previously the skill was `docker cp`'d in by hand
+   after the fact).
+2. Runs `bw-admin create-workspace` **on the host, as root** (the checkout's
+   `.venv/bin/bw-admin`, `--database` pointed at the controller DB). It must
+   run on the host — it creates the user's home tree and (re)creates the
+   workspace container, neither of which the controller container can do
+   (read-only rootfs, no users-root mount, no docker). Host-side DB writes
+   are the WAL-poisoning hazard, so the script immediately repairs sidecar
+   ownership afterward (`chown 10001:1000` on the DB and its `-wal`/`-shm`).
+   This is the ONE sanctioned host-side write; every routine writer still
+   goes through `docker exec bw-controller ...` — a host-uid process that
+   leaves the sidecars under its own uid silently freezes every controller
+   write (`attempt to write a readonly database`) while the container still
+   looks healthy in `docker ps`. Host-side `bw` is safe — it opens the DB
+   `mode=ro`. Cross-uid
+   WAL access is additionally hardened structurally: the controller container
+   joins group 1000 (`--group-add` in `deploy/controller/run.sh`), the data
+   dir is setgid `2770`, and the DB is mode `0664`, so SQLite `-wal`/`-shm`
+   sidecars created by either side stay writable by both. Without this,
+   read-only host clients race `SQLITE_READONLY` between controller
+   transactions — or worse, recover the WAL under their own uid and freeze
+   every controller write.
+3. Installs `deploy/workspace/pi-models.json` (the headroom-copilot provider
+   template, `baseUrl` pointed at `bw-headroom`) into the new home's
+   `.config/pi/agent/models.json`, skipping with a notice if one already
+   exists.
+
+Add each project and its scoped controller token after the workspace exists:
+
+```
+read -rsp 'Project access token: ' PROJECT_TOKEN; echo
+printf '%s' "$PROJECT_TOKEN" | sudo bw-admin add-hosted-project \
+    <workspace-id> <host> <group/project> <project-id> \
+    --token-stdin \
+    --controller-root /srv/eastwatch/controller \
+    --users-root /srv/eastwatch/users
+unset PROJECT_TOKEN
+```
+
+This validates the token against `/user` and the numeric project endpoint,
+ensures the project has an `Agent Board`, derives the bot identity and
+deterministic token environment name, updates the controller config/env and
+workspace `BW_PROJECTS_JSON`, then recreates only the containers whose environment
+changed. Exact reruns are no-ops. If a recreate
+fails, all three files are restored and the prior containers are restarted.
+The token is accepted only through stdin and never written to config YAML or
+command arguments.
+
+It finishes by printing the paste-able teammate checklist:
+
+1. `sudo docker exec -it bw-workspace-<id> zsh -l`
+2. Run `pi` and complete the `/login` flow. The workspace image bakes
+   `PI_CODING_AGENT_DIR=/home/bw/.config/pi/agent`, so login, workers, and
+   `bw resume` share one credential dir. (Pre-2026-08-06 images lacked this
+   ENV — there, export it before running `pi`, or login writes `~/.pi/agent`,
+   which workers never read, and the workspace doctor's pi check goes green
+   over an unusable credential.)
+3. `glab auth login --hostname <host>` — never bare; bare `glab auth login`
+   defaults to gitlab.com.
+4. `git config --global user.name`/`user.email`.
+5. Clone every configured repository under `~/repos/<host>/<path>`.
+6. From each checkout, run
+   `/opt/eastwatch/skills/forge/scripts/glab-board setup` to create the
+   lifecycle labels and board lanes.
+7. `python -m eastwatch.runner.doctor`, repeated inside the container
+   until every check is OK — only then does the workspace flip `ready=1` and
+   become dispatch-eligible. `bw doctor` is the laptop remote-client command.
+8. Mac side: write `~/.config/eastwatch/remote.yaml` (the 5 required
+   keys — `ssh_target`, `ssh_alias`, `owner`, `server_command`, `editor`),
+   pointing `server_command` at `deploy/host/bw-server`; then `bw fleet`.
+9. Personal skills sync — rootfs is read-only and there is no `apt` at
+   runtime, so only `$HOME`-only installs survive:
+   `rsync -av ~/.agents/skills/ <ssh-target>:<host_root>/.agents/skills/`,
+   where `<host_root>` is `bw home`'s output for that workspace.
+
+## What survives respins
+
+- Bind-mounted `/home/bw` (the workspace's `host_root`, one host dir per
+  workspace) persists across container respins and `docker rm`: checkouts,
+  conversation/run state, credentials, and pi session transcripts all live
+  there. This is the only durable layer.
+- `/tmp` is a tmpfs — wiped on every container restart.
+- The rootfs is `--read-only` — no `apt`, no system-level writes at runtime.
+  Anything that must survive a respin either goes in the image
+  (`deploy/workspace/Dockerfile`, rebuilt by `onboard-workspace.sh` step 1) or
+  under `/home/bw` (`$HOME`-only installs, per the skills-sync step above).
+
+## Dispatch and inspect
+
+Ready and Ready-research require exactly one assignee. Only that assignee, an admin, or an approved bot may trigger the run. Model hints must be in the assignee allowlist. Active attachment is read-only. Interactive continuation is available only after the run is terminal and holds one flock for the entire `pi --session` process.
+
+## Failure handling
+
+Do not auto-retry started work. A lost or failed run moves to `agent::failed` and posts its stage, reason, owner, and fixed inspection commands. Preserve its container home, worktree, session, and run artifacts. Resolve `cleanup-failed` manually before dispatching the issue again.
+
+## Retention
+
+Only a current successful implementation run with validated run-scoped MRs is automatic-cleanup eligible. All of its MRs must be merged. Seven days after the latest merge, the runner removes its worktree, run directory, and Pi session. The controller stores a compact audit and `bw audit` remains available. Failed, parked, research, QA, and no-MR runs require explicit operator action.
+
+## Hosted cutover and rollback
+
+Drain and stop local launchd, archive JSON state/conversations/logs without importing them, start the hosted controller, and verify its first cycle adopts current events with zero jobs. Pilot one workspace and one issue before the ten-run load test. Rollback stops hosted containers and restores the untouched local archive; never delete hosted worktrees or MRs as part of rollback.

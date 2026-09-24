@@ -1,0 +1,11 @@
+.git
+.claude
+.pi
+.rpiv
+.venv
+__pycache__
+*.pyc
+*.log
+state
+logs
+PAPERCUTS.md

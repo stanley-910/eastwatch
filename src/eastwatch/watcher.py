@@ -7,6 +7,7 @@ See RUNBOOK.md for operations.
 
 import concurrent.futures
 import copy
+from datetime import datetime
 import fcntl
 import hashlib
 import json
@@ -37,6 +38,7 @@ from eastwatch.collector import (
     StreamCollector,
 )
 from eastwatch.env import getenv
+from eastwatch.controller.tokens import ProjectTokens, token_for_project
 from eastwatch.paths import REPOSITORY_ROOT
 from eastwatch.sessions import find_claude_session_file
 from eastwatch.vault import (
@@ -133,18 +135,16 @@ PROTOCOL = (
     "AND your recommended default so a ✅ can approve it."
 )
 CHARTER_COMMON = (
-    "Autonomy: you are unsupervised — no human sees your intermediate work and nobody will answer mid-run questions. "
-    "Work the issue end-to-end. Park (STATUS: parked) only when a decision genuinely requires the owner, not for anything "
-    "you can verify or decide yourself. Structure your own working loop to fit the task, and use the skills your harness "
-    "provides (e.g. `/wf` under Pi) when the task warrants that rigor. You are a leaf worker in a managed fleet: never "
-    "launch another agent CLI (`claude`, `pi`, `codex`, …) as a subprocess and never invoke orchestration skills, even if "
-    "a skill's instructions suggest it — delegation decisions belong to the dispatcher, and cross-CLI children are "
-    "invisible to the fleet's observability."
+    "Autonomy: you are unsupervised — no human sees intermediate work and nobody will answer mid-run questions. "
+    "Work the issue end-to-end. Park (STATUS: parked) only when a decision genuinely requires the owner, not for "
+    "anything you can verify or decide yourself. Structure your own working loop and use the skills your harness "
+    "provides. Harness-native subagents are allowed for bounded parallel work. Never launch another agent CLI "
+    "(`claude`, `pi`, `codex`, and similar) as a subprocess; those children bypass fleet observability."
 )
 CHARTER_WORK = (
-    "Before `finish`, verify your change (`/verify` if available, otherwise the repo's test suite) and state in your final "
-    "reply what you ran and what it showed. If the card turns out to be too big for one context window, park with a proposed "
-    "split — the board is how work fans out, not subagents."
+    "Before `finish`, verify the change (`/verify` if available, otherwise the repository test suite) and state in "
+    "your final reply what you ran and what it showed. If the card is too large after bounded native delegation, "
+    "park with a concrete issue split."
 )
 CHARTER_RESEARCH = (
     "For broad sweeps, parallel read-only fan-out through your harness's native subagent mechanism is appropriate; merge "
@@ -193,6 +193,10 @@ class TransientMRFetchError(Exception):
     pass
 
 
+class TransientIssueFetchError(Exception):
+    pass
+
+
 class TransientDiscussionLookupError(Exception):
     pass
 
@@ -216,6 +220,7 @@ RAW_CAPTURE_RETENTION_SECONDS = 14 * 24 * 60 * 60
 SWEEP_INTERVAL_SECONDS = 24 * 60 * 60
 DISCUSSION_LIST_PER_PAGE = 100
 DISCUSSION_LIST_PAGE_CAP = 20
+TRANSIENT_GIVE_UP_SECONDS = 900
 
 
 # --------------------------------------------------------------------------- gitlab
@@ -895,45 +900,19 @@ def discussion_by_id(
         ) from e
 
 
-def discussion_has_bot_note(
-    gl: GitLab, proj: dict, surface: str, iid: str | int, discussion_id: str | None
-) -> bool:
-    bot_user_id = proj.get("bot_user_id")
-    if bot_user_id is None:
-        return False
-    discussion = discussion_by_id(gl, proj, surface, iid, discussion_id)
-    if discussion is None:
-        return False
-    return any(
-        str((note.get("author") or {}).get("id")) == str(bot_user_id)
-        for note in discussion.get("notes") or []
-    )
-
-
-def find_note_discussion_id(
-    gl: GitLab,
-    proj: dict,
-    surface: str,
-    iid: str | int,
-    note_id: str | int | None,
-    discussion_id: str | None = None,
-) -> str | None:
-    if not note_id and not discussion_id:
+def note_discussion(
+    gl: GitLab, proj: dict, surface: str, iid: str | int, note_id: str | int | None
+) -> dict | None:
+    """Scan the discussions list for the discussion containing note_id; None when not found or individual_note."""
+    if not note_id:
         return None
-    note_id = str(note_id) if note_id else None
-    discussion_id = str(discussion_id) if discussion_id else None
-    if discussion_id:
-        discussion = discussion_by_id(gl, proj, surface, iid, discussion_id)
-        if discussion is None or discussion.get("individual_note") is True:
-            return None
-        return str(discussion.get("id") or discussion_id)
-
+    note_id = str(note_id)
     path = discussion_path(proj, surface, iid)
     try:
         for page in range(1, DISCUSSION_LIST_PAGE_CAP + 1):
             discussions = gl.get(path, per_page=DISCUSSION_LIST_PER_PAGE, page=page)
             for discussion in discussions:
-                note_matches = note_id and any(
+                note_matches = any(
                     str(note.get("id")) == note_id
                     for note in discussion.get("notes") or []
                 )
@@ -941,7 +920,7 @@ def find_note_discussion_id(
                     continue
                 if discussion.get("individual_note") is True:
                     return None
-                return discussion.get("id")
+                return discussion
             if len(discussions) < DISCUSSION_LIST_PER_PAGE:
                 return None
         log.warning(
@@ -983,6 +962,45 @@ def find_note_discussion_id(
         raise TransientDiscussionLookupError(
             f"{surface} !{iid} discussions lookup for note {note_id} failed: {e}"
         ) from e
+
+
+def discussion_has_bot_note(
+    gl: GitLab, proj: dict, surface: str, iid: str | int, discussion_id: str | None
+) -> bool:
+    bot_user_id = proj.get("bot_user_id")
+    if bot_user_id is None:
+        return False
+    discussion = discussion_by_id(gl, proj, surface, iid, discussion_id)
+    if discussion is None:
+        return False
+    return any(
+        str((note.get("author") or {}).get("id")) == str(bot_user_id)
+        for note in discussion.get("notes") or []
+    )
+
+
+def find_note_discussion_id(
+    gl: GitLab,
+    proj: dict,
+    surface: str,
+    iid: str | int,
+    note_id: str | int | None,
+    discussion_id: str | None = None,
+) -> str | None:
+    if not note_id and not discussion_id:
+        return None
+    note_id = str(note_id) if note_id else None
+    discussion_id = str(discussion_id) if discussion_id else None
+    if discussion_id:
+        discussion = discussion_by_id(gl, proj, surface, iid, discussion_id)
+        if discussion is None or discussion.get("individual_note") is True:
+            return None
+        return str(discussion.get("id") or discussion_id)
+
+    discussion = note_discussion(gl, proj, surface, iid, note_id)
+    if discussion is None:
+        return None
+    return discussion.get("id")
 
 
 def note_discussion_id(
@@ -2197,7 +2215,9 @@ def fetch_mr(
         return None
 
 
-def fetch_issue(gl: GitLab, proj: dict, iid: str) -> dict | None:
+def fetch_issue(
+    gl: GitLab, proj: dict, iid: str, *, raise_transient: bool = False
+) -> dict | None:
     try:
         return gl.get(f"projects/{proj['id']}/issues/{iid}")
     except requests.HTTPError as e:
@@ -2205,11 +2225,542 @@ def fetch_issue(gl: GitLab, proj: dict, iid: str) -> dict | None:
         if status_code == 404:
             log.warning("issue !%s fetch returned 404", iid)
             return None
+        if raise_transient:
+            raise TransientIssueFetchError(f"issue !{iid} fetch failed: {e}") from e
         log.warning("issue !%s fetch failed: %s", iid, e)
         return None
     except requests.RequestException as e:
+        if raise_transient:
+            raise TransientIssueFetchError(f"issue !{iid} fetch failed: {e}") from e
         log.warning("issue !%s fetch failed: %s", iid, e)
         return None
+
+
+def hosted_label_fires(gl: GitLab, proj: dict, label: str) -> list[dict]:
+    issues = gl.get(
+        f"projects/{proj['id']}/issues", labels=label, state="opened", per_page=100
+    )
+    fires = []
+    for issue in issues:
+        events = gl.get(
+            f"projects/{proj['id']}/issues/{issue['iid']}/resource_label_events",
+            per_page=100,
+        )
+        additions = [
+            event
+            for event in events
+            if event.get("action") == "add"
+            and (event.get("label") or {}).get("name") == label
+        ]
+        if not additions:
+            continue
+        newest = max(additions, key=lambda event: event["id"])
+        actor = newest.get("user") or {}
+        fires.append(
+            {
+                "event_id": str(newest["id"]),
+                "actor_username": str(actor.get("username") or ""),
+                "actor_user_id": int(actor["id"])
+                if actor.get("id") is not None
+                else None,
+                "issue": issue,
+                "label": label,
+            }
+        )
+    return fires
+
+
+def parse_event_created_at(value: str | None) -> float:
+    """Epoch seconds for a GitLab event's ISO8601 created_at; time.time() on any parse failure."""
+    if not value:
+        return time.time()
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return time.time()
+
+
+def hosted_comment_events(
+    gl: GitLab, proj: dict, after_event_id: int
+) -> tuple[list[dict], int]:
+    events = gl.get(f"projects/{proj['id']}/events", action="commented", per_page=100)
+    cursor = max((int(event["id"]) for event in events), default=after_event_id)
+    comments = []
+    for event in sorted(events, key=lambda item: int(item["id"])):
+        if int(event["id"]) <= after_event_id:
+            continue
+        note = event.get("note") or {}
+        author = event.get("author") or {}
+        if note.get("system") or note.get("noteable_type") not in (
+            "Issue",
+            "MergeRequest",
+        ):
+            continue
+        if author.get("id") == proj.get("bot_user_id"):
+            continue
+        if author.get("username") == proj.get("bot_username"):
+            continue
+        body = note.get("body") or ""
+        question = agent_mention_question(body)
+        comments.append(
+            {
+                "event_id": str(event["id"]),
+                "actor_username": str(author.get("username") or ""),
+                "actor_user_id": int(author["id"])
+                if author.get("id") is not None
+                else None,
+                "noteable_type": note.get("noteable_type"),
+                "noteable_iid": int(note["noteable_iid"]),
+                "note_id": int(note["id"]) if note.get("id") is not None else None,
+                "position": note.get("position"),
+                "body": body,
+                "question": question,
+                "created_at": parse_event_created_at(event.get("created_at")),
+            }
+        )
+    return comments, cursor
+
+
+def hosted_candidate(
+    gl: GitLab,
+    proj: dict,
+    issue: dict,
+    *,
+    event_key: str,
+    event_kind: str,
+    actor_username: str,
+    trigger_kind: str,
+    trigger_messages: tuple[str, ...],
+    hint_texts: tuple[str, ...],
+    reply_target: dict | None = None,
+    actor_user_id: int | None = None,
+):
+    from eastwatch.controller.dispatch import Assignee, DispatchCandidate
+
+    assignees = tuple(
+        Assignee(username=str(item["username"]), user_id=int(item["id"]))
+        for item in issue.get("assignees") or ()
+        if item.get("username") and item.get("id") is not None
+    )
+    return DispatchCandidate(
+        host=proj["host"],
+        project_path=proj["path"],
+        project_id=int(proj["id"]),
+        issue_iid=int(issue["iid"]),
+        issue_url=str(issue["web_url"]),
+        issue_title=str(issue.get("title") or ""),
+        issue_description=str(issue.get("description") or ""),
+        event_key=event_key,
+        event_kind=event_kind,
+        actor_username=actor_username,
+        trigger_kind=trigger_kind,
+        assignees=assignees,
+        hint_texts=hint_texts,
+        trigger_messages=trigger_messages,
+        thread_context=fetch_issue_context(gl, proj, issue["iid"]),
+        worker_briefing=proj.get("worker_briefing"),
+        jira_context="",
+        reply_target=reply_target,
+        actor_user_id=actor_user_id,
+    )
+
+
+def hosted_cycle(cfg: dict, store, dispatcher, bot_tokens: ProjectTokens) -> None:
+    for proj in cfg["projects"]:
+        if project_is_github(proj):
+            raise ConfigurationError("hosted pilot supports GitLab projects only")
+        project_key = project_config_key(proj)
+        gl = GitLab(proj["host"], token_for_project(bot_tokens, project_key))
+        with store.transaction() as connection:
+            connection.execute(
+                """
+                INSERT INTO projects(project_key, host, project_path, project_id)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(project_key) DO UPDATE SET project_id = excluded.project_id
+                """,
+                (project_key, proj["host"], proj["path"], int(proj["id"])),
+            )
+            project_state_row = connection.execute(
+                "SELECT last_event_id, bootstrapped FROM projects WHERE project_key = ?",
+                (project_key,),
+            ).fetchone()
+        bootstrapped = bool(project_state_row["bootstrapped"])
+        comments, cursor = hosted_comment_events(
+            gl, proj, int(project_state_row["last_event_id"])
+        )
+        label_fires = [
+            fire
+            for label in TRIGGER_LABELS
+            if label in proj.get("triggers", [])
+            for fire in hosted_label_fires(gl, proj, label)
+        ]
+        if not bootstrapped:
+            for fire in label_fires:
+                store.record_event(
+                    project_key,
+                    f"{project_key}:label:{fire['event_id']}",
+                    "adopted-label",
+                    fire["actor_username"],
+                    {"issue_iid": int(fire["issue"]["iid"]), "label": fire["label"]},
+                )
+            with store.transaction() as connection:
+                connection.execute(
+                    "UPDATE projects SET last_event_id = ?, bootstrapped = 1 WHERE project_key = ?",
+                    (cursor, project_key),
+                )
+            continue
+        for fire in label_fires:
+            durable_event_key = f"{project_key}:label:{fire['event_id']}"
+            if dispatcher.consumed_event(project_key, durable_event_key) is not None:
+                continue
+            candidate = hosted_candidate(
+                gl,
+                proj,
+                fire["issue"],
+                event_key=fire["event_id"],
+                event_kind="label",
+                actor_username=fire["actor_username"],
+                trigger_kind=fire["label"],
+                trigger_messages=(),
+                hint_texts=(str(fire["issue"].get("description") or ""),),
+                actor_user_id=fire["actor_user_id"],
+            )
+            dispatcher.dispatch(candidate)
+        comment_fires = comments if "mention" in proj.get("triggers", []) else ()
+        halted_at: int | None = None
+        for comment in comment_fires:
+            durable_event_key = f"{project_key}:comment:{comment['event_id']}"
+            if dispatcher.consumed_event(project_key, durable_event_key) is not None:
+                continue
+            try:
+                if comment["question"] is None:
+                    # Plain (un-tagged) reply: a resume gesture, not a command. Deliberately
+                    # quiet on skip (no receipts) -- random chatter must not accumulate rows;
+                    # the cursor advance above is what "consumes" it.
+                    surface = (
+                        "mr" if comment["noteable_type"] == "MergeRequest" else "issue"
+                    )
+                    iid = comment["noteable_iid"]
+                    discussion = note_discussion(
+                        gl, proj, surface, iid, comment["note_id"]
+                    )
+                    if discussion is None:
+                        continue  # top-level note or discussion not found: not a resume gesture
+                    bot_user_id = proj.get("bot_user_id")
+                    bot_notes = [
+                        note
+                        for note in discussion.get("notes") or []
+                        if bot_user_id is not None
+                        and str((note.get("author") or {}).get("id"))
+                        == str(bot_user_id)
+                    ]
+                    if not bot_notes:
+                        continue  # discussion the bot never participated in
+                    plain_body = (comment["body"] or "").strip()
+                    if any(
+                        (note.get("body") or "").strip() == plain_body
+                        for note in bot_notes
+                    ):
+                        continue  # echo guard: owner pasted the bot's own text back
+                    discussion_id = discussion.get("id")
+                    if surface == "mr":
+                        mr_iid = iid
+                        mr = fetch_mr(gl, proj, str(mr_iid), raise_transient=True)
+                        if mr is None:
+                            continue
+                        if mr_is_closed_or_merged(mr):
+                            log.info(
+                                "merge request !%s plain note ignored: merge request is closed/merged",
+                                mr_iid,
+                            )
+                            continue
+                        mapped = parse_mr_marker(mr.get("description"), proj)
+                        if mapped is None:
+                            continue  # markerless MRs stay out of scope: record nothing
+                        issue = fetch_issue(gl, proj, mapped, raise_transient=True)
+                        if issue is None:
+                            continue
+                        reply_target = {"kind": "mr", "iid": mr_iid}
+                        if discussion_id:
+                            reply_target["discussion_id"] = discussion_id
+                        candidate = hosted_candidate(
+                            gl,
+                            proj,
+                            issue,
+                            event_key=comment["event_id"],
+                            event_kind="comment",
+                            actor_username=comment["actor_username"],
+                            trigger_kind="qa",
+                            trigger_messages=(
+                                mr_comment_context(
+                                    mr,
+                                    {
+                                        "position": comment.get("position"),
+                                        "comment_body": comment["body"],
+                                    },
+                                ),
+                            ),
+                            hint_texts=(
+                                comment["body"],
+                                str(mr.get("description") or ""),
+                                str(issue.get("description") or ""),
+                            ),
+                            reply_target=reply_target,
+                            actor_user_id=comment["actor_user_id"],
+                        )
+                        dispatcher.dispatch(candidate)
+                        continue
+                    issue = fetch_issue(gl, proj, iid, raise_transient=True)
+                    if issue is None:
+                        continue
+                    if surface_state(issue.get("state")) not in {"opened", "open"}:
+                        log.info("issue !%s plain note ignored: issue is not open", iid)
+                        continue
+                    reply_target = {"kind": "issue", "iid": iid}
+                    if discussion_id:
+                        reply_target["discussion_id"] = discussion_id
+                    candidate = hosted_candidate(
+                        gl,
+                        proj,
+                        issue,
+                        event_key=comment["event_id"],
+                        event_kind="comment",
+                        actor_username=comment["actor_username"],
+                        trigger_kind="qa",
+                        trigger_messages=(comment["body"],),
+                        hint_texts=(
+                            comment["body"],
+                            str(issue.get("description") or ""),
+                        ),
+                        reply_target=reply_target,
+                        actor_user_id=comment["actor_user_id"],
+                    )
+                    dispatcher.dispatch(candidate)
+                    continue
+                if comment["noteable_type"] == "MergeRequest":
+                    mr_iid = comment["noteable_iid"]
+                    mr = fetch_mr(gl, proj, str(mr_iid), raise_transient=True)
+                    if mr is None:
+                        dispatcher.record_skipped_event(
+                            project_key=project_key,
+                            host=proj["host"],
+                            project_path=proj["path"],
+                            project_id=int(proj["id"]),
+                            event_key=durable_event_key,
+                            event_kind="comment",
+                            actor_username=comment["actor_username"],
+                            reason=f"merge request !{mr_iid} not found during hosted polling",
+                        )
+                        continue
+                    mapped = parse_mr_marker(mr.get("description"), proj)
+                    if mapped is None:
+                        dispatcher.record_skipped_event(
+                            project_key=project_key,
+                            host=proj["host"],
+                            project_path=proj["path"],
+                            project_id=int(proj["id"]),
+                            event_key=durable_event_key,
+                            event_kind="comment",
+                            actor_username=comment["actor_username"],
+                            reason=(
+                                f"merge request !{mr_iid} has no eastwatch source marker; "
+                                "cannot route to a conversation"
+                            ),
+                        )
+                        continue
+                    issue = fetch_issue(gl, proj, mapped, raise_transient=True)
+                    if issue is None:
+                        dispatcher.record_skipped_event(
+                            project_key=project_key,
+                            host=proj["host"],
+                            project_path=proj["path"],
+                            project_id=int(proj["id"]),
+                            event_key=durable_event_key,
+                            event_kind="comment",
+                            actor_username=comment["actor_username"],
+                            reason=(
+                                f"merge request !{mr_iid} maps to issue !{mapped}, "
+                                "which was not found during hosted polling"
+                            ),
+                        )
+                        continue
+                    try:
+                        discussion_id = find_note_discussion_id(
+                            gl, proj, "mr", mr_iid, comment["note_id"]
+                        )
+                    except (
+                        TransientDiscussionLookupError,
+                        requests.RequestException,
+                    ) as e:
+                        log.warning(
+                            "merge request !%s: could not resolve discussion for note %s: %s",
+                            mr_iid,
+                            comment["note_id"],
+                            e,
+                        )
+                        discussion_id = None
+                    reply_target = {"kind": "mr", "iid": mr_iid}
+                    if discussion_id:
+                        reply_target["discussion_id"] = discussion_id
+                    candidate = hosted_candidate(
+                        gl,
+                        proj,
+                        issue,
+                        event_key=comment["event_id"],
+                        event_kind="comment",
+                        actor_username=comment["actor_username"],
+                        trigger_kind="qa",
+                        trigger_messages=(
+                            mr_comment_context(
+                                mr,
+                                {
+                                    "position": comment.get("position"),
+                                    "comment_body": comment["body"],
+                                },
+                                comment["question"],
+                            ),
+                        ),
+                        hint_texts=(
+                            comment["body"],
+                            str(mr.get("description") or ""),
+                            str(issue.get("description") or ""),
+                        ),
+                        reply_target=reply_target,
+                        actor_user_id=comment["actor_user_id"],
+                    )
+                    dispatcher.dispatch(candidate)
+                    continue
+                iid = comment["noteable_iid"]
+                issue = fetch_issue(gl, proj, iid, raise_transient=True)
+                if issue is None:
+                    log.warning(
+                        "issue !%s vanished during hosted polling; skipping %s",
+                        iid,
+                        durable_event_key,
+                    )
+                    dispatcher.record_skipped_event(
+                        project_key=project_key,
+                        host=proj["host"],
+                        project_path=proj["path"],
+                        project_id=int(proj["id"]),
+                        event_key=durable_event_key,
+                        event_kind="comment",
+                        actor_username=comment["actor_username"],
+                        reason=f"issue !{iid} not found during hosted polling",
+                    )
+                    continue
+                try:
+                    discussion_id = find_note_discussion_id(
+                        gl, proj, "issue", iid, comment["note_id"]
+                    )
+                except (TransientDiscussionLookupError, requests.RequestException) as e:
+                    log.warning(
+                        "issue !%s: could not resolve discussion for note %s: %s",
+                        iid,
+                        comment["note_id"],
+                        e,
+                    )
+                    discussion_id = None
+                reply_target = {"kind": "issue", "iid": iid}
+                if discussion_id:
+                    reply_target["discussion_id"] = discussion_id
+                candidate = hosted_candidate(
+                    gl,
+                    proj,
+                    issue,
+                    event_key=comment["event_id"],
+                    event_kind="comment",
+                    actor_username=comment["actor_username"],
+                    trigger_kind="qa",
+                    trigger_messages=(comment["question"],),
+                    hint_texts=(comment["body"], str(issue.get("description") or "")),
+                    reply_target=reply_target,
+                    actor_user_id=comment["actor_user_id"],
+                )
+                dispatcher.dispatch(candidate)
+            except (
+                TransientMRFetchError,
+                TransientIssueFetchError,
+                TransientDiscussionLookupError,
+                requests.RequestException,
+            ) as e:
+                if time.time() - comment["created_at"] < TRANSIENT_GIVE_UP_SECONDS:
+                    log.warning(
+                        "%s: transient failure handling comment %s, retrying next cycle: %s",
+                        durable_event_key,
+                        comment["event_id"],
+                        e,
+                    )
+                    halted_at = int(comment["event_id"])
+                    break  # stop processing later comments: order preserved
+                dispatcher.record_skipped_event(
+                    project_key=project_key,
+                    host=proj["host"],
+                    project_path=proj["path"],
+                    project_id=int(proj["id"]),
+                    event_key=durable_event_key,
+                    event_kind="comment",
+                    actor_username=comment["actor_username"],
+                    reason=f"giving up after repeated transient failures: {e}",
+                )
+                continue
+        with store.transaction() as connection:
+            connection.execute(
+                "UPDATE projects SET last_event_id = ? WHERE project_key = ?",
+                (halted_at - 1 if halted_at is not None else cursor, project_key),
+            )
+        for row in store.pending_conversations(project_key):
+            entries = json.loads(row["pending_json"])
+            if not entries:
+                continue
+            iid = int(row["issue_iid"])
+            try:
+                issue = fetch_issue(gl, proj, str(iid), raise_transient=True)
+            except (TransientIssueFetchError, requests.RequestException) as e:
+                log.warning(
+                    "%s !%s: transient failure draining queued comments, retrying next cycle: %s",
+                    project_key,
+                    iid,
+                    e,
+                )
+                continue
+            if issue is None or surface_state(issue.get("state")) not in {
+                "opened",
+                "open",
+            }:
+                store.clear_pending(row["conversation_key"], len(entries))
+                log.info(
+                    "%s !%s: queued comments dropped, issue not found or not open",
+                    project_key,
+                    iid,
+                )
+                continue
+            last_entry = entries[-1]
+            candidate = hosted_candidate(
+                gl,
+                proj,
+                issue,
+                event_key=f"pending:{last_entry['event_key']}",
+                event_kind="comment",
+                actor_username=last_entry["actor_username"],
+                trigger_kind="qa",
+                trigger_messages=tuple(
+                    message for entry in entries for message in entry["messages"]
+                ),
+                hint_texts=(str(issue.get("description") or ""),),
+                reply_target=last_entry.get("reply_target"),
+                actor_user_id=last_entry.get("actor_user_id"),
+            )
+            result = dispatcher.dispatch(candidate)
+            if result.accepted or result.reason == "event was already consumed":
+                store.clear_pending(row["conversation_key"], len(entries))
+            else:
+                log.info(
+                    "%s !%s: queued comment drain not dispatched, retrying next cycle: %s",
+                    project_key,
+                    iid,
+                    result.reason,
+                )
 
 
 def surface_state(value: str | None) -> str | None:
@@ -3880,6 +4431,7 @@ def run_claude_request(req: dict) -> dict:
 
 
 def acquire_pi_lock(deadline: float):
+    PI_LOCK.parent.mkdir(parents=True, exist_ok=True)
     lockf = open(PI_LOCK, "w")
     while True:
         try:
@@ -4146,6 +4698,9 @@ def pi_result(
         **reply_evidence(reply),
         "completed_at": time.time(),
         "exit_code": code,
+        "stats": compute_run_stats(
+            session_file, req.get("model"), req.get("journal_path")
+        ),
     }
 
 
@@ -4304,6 +4859,7 @@ def write_worker_error(
 
 
 def worker_main(request_path: str) -> int:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
     req = read_json_file(request_path)
     Path(req["wrapper_pid_path"]).write_text(f"{os.getpid()}\n")
     try:
@@ -4595,6 +5151,213 @@ def resume_footer(conv: dict) -> str:
     except ValueError:
         pass
     return f"\n\n---\nmodel: [{answered_by}]\n```\npi --session {session_file}\n```"
+
+
+_SUBAGENT_TOOL_CALL_TYPES = {"toolCall", "tool_call", "toolUse", "tool_use"}
+_SUBAGENT_TOOL_NAMES = {"task", "subagent", "agent", "spawn_agent", "dispatch_agent"}
+
+
+def compute_run_stats(
+    session_file: str, model: str | None, journal_path: str | None
+) -> dict | None:
+    """Summarize a pi session transcript for the collapsible run-stats footer.
+
+    Best-effort telemetry attached to an already-successful run: any failure
+    (missing file, unexpected shape) must not take the delivery path down, so
+    every exception collapses to None rather than propagating.
+    """
+    try:
+        totals = {
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_write": 0,
+            "reasoning": 0,
+            "total": 0,
+        }
+        cost = 0.0
+        turns = 0
+        compactions = 0
+        subagents = 0
+        last_usage = None
+        with open(session_file, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                entry_type = entry.get("type")
+                if isinstance(entry_type, str) and "compact" in entry_type.lower():
+                    compactions += 1
+                message = entry.get("message")
+                if not isinstance(message, dict):
+                    continue
+                for item in message.get("content") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    name = item.get("name")
+                    if (
+                        item.get("type") in _SUBAGENT_TOOL_CALL_TYPES
+                        and isinstance(name, str)
+                        and name.lower() in _SUBAGENT_TOOL_NAMES
+                    ):
+                        subagents += 1
+                if message.get("role") != "assistant":
+                    continue
+                usage = message.get("usage")
+                if not isinstance(usage, dict):
+                    continue
+                totals["input"] += int(usage.get("input") or 0)
+                totals["output"] += int(usage.get("output") or 0)
+                totals["cache_read"] += int(usage.get("cacheRead") or 0)
+                totals["cache_write"] += int(usage.get("cacheWrite") or 0)
+                totals["reasoning"] += int(usage.get("reasoning") or 0)
+                totals["total"] += int(usage.get("totalTokens") or 0)
+                usage_cost = usage.get("cost")
+                if isinstance(usage_cost, dict):
+                    cost += float(usage_cost.get("total") or 0)
+                turns += 1
+                last_usage = usage
+
+        context_tokens = None
+        if last_usage is not None:
+            context_tokens = (
+                int(last_usage.get("input") or 0)
+                + int(last_usage.get("cacheRead") or 0)
+                + int(last_usage.get("cacheWrite") or 0)
+            )
+
+        duration_s = None
+        if journal_path:
+            try:
+                with open(journal_path, "r", encoding="utf-8") as journal_handle:
+                    first_line = journal_handle.readline().strip()
+                if first_line:
+                    started_at = json.loads(first_line).get("ts")
+                    if started_at is not None:
+                        duration_s = time.time() - float(started_at)
+            except (OSError, json.JSONDecodeError, ValueError, TypeError):
+                duration_s = None
+
+        context_window = None
+        try:
+            models_dir = Path(
+                os.environ.get("PI_CODING_AGENT_DIR")
+                or (Path.home() / ".config" / "pi" / "agent")
+            )
+            with (models_dir / "models.json").open(
+                "r", encoding="utf-8"
+            ) as models_handle:
+                providers = json.load(models_handle).get("providers") or {}
+            for provider_info in providers.values():
+                for model_entry in (provider_info or {}).get("models") or []:
+                    if isinstance(model_entry, dict) and model_entry.get("id") == model:
+                        context_window = model_entry.get("contextWindow")
+                        break
+                if context_window is not None:
+                    break
+        except (OSError, json.JSONDecodeError, ValueError, AttributeError):
+            context_window = None
+
+        return {
+            "schema": 1,
+            "duration_s": int(duration_s) if duration_s is not None else None,
+            "turns": turns,
+            "input": totals["input"],
+            "output": totals["output"],
+            "cache_read": totals["cache_read"],
+            "cache_write": totals["cache_write"],
+            "reasoning": totals["reasoning"],
+            "total_tokens": totals["total"],
+            "cost_usd": round(cost, 4),
+            "compactions": compactions,
+            "subagents": subagents,
+            "context_tokens": context_tokens,
+            "context_window": context_window,
+        }
+    except Exception:
+        return None
+
+
+def _humanize_tokens(value: int | None) -> str | None:
+    if value is None:
+        return None
+    if value < 1000:
+        return str(value)
+    if value < 1_000_000:
+        return f"{value / 1000:.1f}K"
+    return f"{value / 1_000_000:.1f}M"
+
+
+def _humanize_duration(seconds: float | None) -> str | None:
+    if seconds is None:
+        return None
+    whole = max(0, int(seconds))
+    minutes, secs = divmod(whole, 60)
+    return f"{minutes}m{secs:02d}s" if minutes else f"{secs}s"
+
+
+def _humanize_cost(cost: float | None) -> str | None:
+    return None if cost is None else f"${cost:.4f}"
+
+
+def render_stats_footer(stats: dict | None) -> str:
+    """Render the collapsed run-stats block appended after a delivered note.
+
+    GitLab only renders the markdown table inside <details> when it is
+    surrounded by blank lines, and `<br/>` must never appear here — Stanley
+    pastes agent notes into Excalidraw, which doesn't render HTML breaks.
+    """
+    if not stats:
+        return ""
+
+    duration = _humanize_duration(stats.get("duration_s"))
+    total_tokens = _humanize_tokens(stats.get("total_tokens"))
+    cost = _humanize_cost(stats.get("cost_usd"))
+
+    rows: list[tuple[str, str]] = []
+    if duration is not None:
+        rows.append(("duration", duration))
+    if stats.get("turns") is not None:
+        rows.append(("model turns", str(stats["turns"])))
+    tokens_in = _humanize_tokens(stats.get("input"))
+    if tokens_in is not None:
+        rows.append(("tokens in", tokens_in))
+    tokens_out = _humanize_tokens(stats.get("output"))
+    if tokens_out is not None:
+        rows.append(("tokens out", tokens_out))
+    cache_read = _humanize_tokens(stats.get("cache_read"))
+    if cache_read is not None:
+        rows.append(("cache read", cache_read))
+    cache_write = _humanize_tokens(stats.get("cache_write"))
+    if cache_write is not None:
+        rows.append(("cache write", cache_write))
+    reasoning = _humanize_tokens(stats.get("reasoning"))
+    if reasoning is not None:
+        rows.append(("reasoning", reasoning))
+    if cost is not None:
+        rows.append(("cost", cost))
+    if stats.get("compactions") is not None:
+        rows.append(("compactions", str(stats["compactions"])))
+    if stats.get("subagents") is not None:
+        rows.append(("subagent calls", str(stats["subagents"])))
+    context_tokens = stats.get("context_tokens")
+    if context_tokens is not None:
+        context_window = stats.get("context_window")
+        if context_window:
+            pct = round(context_tokens / context_window * 100)
+            rows.append(("context", f"{context_tokens} / {context_window} ({pct}%)"))
+        else:
+            rows.append(("context", str(context_tokens)))
+
+    table_rows = "\n".join(f"| {label} | {value} |" for label, value in rows)
+    summary = (
+        f"run stats — {duration or '?'} · {total_tokens or '?'} tokens · {cost or '?'}"
+    )
+    return f"\n\n<details><summary>{summary}</summary>\n\n| metric | value |\n|---|---|\n{table_rows}\n\n</details>"
 
 
 # --------------------------------------------------------------------------- dispatch
@@ -4942,7 +5705,12 @@ def collect_success(
     if issue_iid:
         capture_mrs_from_reply(gl, proj, ps, issue_iid, conv, reply)
     save_state(state)
-    note = post_conversation_note(gl, proj, conv, body + resume_footer(conv))
+    note = post_conversation_note(
+        gl,
+        proj,
+        conv,
+        body + render_stats_footer(result.get("stats")) + resume_footer(conv),
+    )
     conv["last_note_id"] = note["id"]
     conv["last_reply_body_hash"] = body_hash(body)
     run["completed_at"] = float(result.get("completed_at") or time.time())
@@ -6194,6 +6962,13 @@ def main() -> int:
         log.error("no config at %s — copy config.yaml.example there", CONFIG_PATH)
         return 1
     cfg = yaml.safe_load(CONFIG_PATH.read_text())
+    execution_mode = str((cfg.get("execution") or {}).get("mode") or "local")
+    if execution_mode != "local":
+        log.error(
+            "execution.mode=%s requires bw-controller; refusing local dispatch",
+            execution_mode,
+        )
+        return 1
     warn_unknown_triggers(cfg)
     try:
         state = load_state()

@@ -215,3 +215,20 @@ uv run python -m unittest discover -v
 # Focused modules
 uv run python -m unittest -v tests.test_pi_parallelism tests.test_fleet_tui
 ```
+
+## Hosted pilot
+
+Hosted mode runs one GitLab-polling controller and one persistent Docker workspace per assignee. Ready/Ready-research labels and explicit `@agent` issue comments dispatch work. Each project can select its own project-scoped board-bot token with `bot_token_env`; Git, Pi, and merge requests use the assignee's credentials inside their single workspace.
+
+Hosted mode is explicit through `execution.mode: hosted`. It does not fall back to local execution. Use `bw-admin add-hosted-project --token-stdin` to route another project and token through the existing controller/workspace. See `ONBOARDING.md` for the end-to-end teammate path and `RUNBOOK.md` for operations and cutover.
+
+Local inspection commands:
+
+- `bw fleet [--json]`
+- `bw path <issue-or-run> [--copy]`
+- `bw logs <run> [--follow]`
+- `bw attach <active-run>` for read-only tmux attachment
+- `bw open <issue-or-run>` for Remote SSH
+- `bw resume <terminal-run>` for one locked `pi --session` continuation
+- `bw audit <archived-run>` after retention cleanup
+- `bw doctor`

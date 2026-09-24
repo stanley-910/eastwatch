@@ -14,9 +14,16 @@ dependencies = [
   "textual>=6.6,<7",
 ]
 
+[project.optional-dependencies]
+controller = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1"]
+
 [project.scripts]
 eastwatch = "eastwatch.watcher:cli"
 board-watcher = "eastwatch.watcher:cli" # one-release compatibility alias
+bw = "eastwatch.bw:main"
+bw-admin = "eastwatch.admin:main"
+bw-controller = "eastwatch.controller.main:main"
+bw-runner = "eastwatch.runner.runtime:main"
 fleet-dismiss = "eastwatch.fleet.dismiss:main"
 fleet-resume = "eastwatch.fleet.resume:main"
 fleet-status = "eastwatch.fleet.status:main"
@@ -29,6 +36,7 @@ packages = ["src/eastwatch", "src/board_watcher"]
 
 [dependency-groups]
 dev = [
+  "httpx>=0.28",
   "pytest>=8.3",
   "ruff>=0.8",
 ]

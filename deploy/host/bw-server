@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# deploy/host/bw-server — host-side entrypoint for the local bw CLI (via ssh).
+# The controller container (uid 10001) is the ONLY writer of the controller DB;
+# bw opens it mode=ro. Never point a writer (bw-admin) at this path from the
+# host — run writers via: sudo docker exec bw-controller bw-admin ...
+export BW_CONTROLLER_DB="${BW_CONTROLLER_DB:-$HOME/eastwatch-pilot-data/controller/data/controller.db}"
+exec "$(dirname "$0")/../../.venv/bin/bw" "$@"

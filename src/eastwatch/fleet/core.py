@@ -63,9 +63,24 @@ class FleetRow:
     run_id: str = ""
     journal: str = ""
     trace_source: str = ""
+    job_id: str = ""
+    owner: str = ""
+    workspace_id: str = ""
+    container: str = ""
+    host_path: str = ""
+    run_dir_relpath: str = ""
+    worktree_relpath: str = ""
+    session_file_relpath: str = ""
+    session_lock_path: str = ""
+    tmux_session: str = ""
+    lease_generation: int = 0
+    remote: bool = False
+    capabilities: tuple[str, ...] = ()
+    audit_available: bool = False
+    last_heartbeat_at: float | None = None
 
     @classmethod
-    def from_mapping(cls, raw: Mapping[str, object]) -> FleetRow:
+    def from_mapping(cls, raw: Mapping[str, object]) -> "FleetRow":
         display_model = str(raw.get("model") or "?")
         model_parts = display_model.split(":")
         provider = str(raw.get("provider") or (model_parts[0] if model_parts else "?"))
@@ -73,6 +88,7 @@ class FleetRow:
             raw.get("model_id") or (model_parts[1] if len(model_parts) > 1 else "?")
         )
         key = str(raw.get("key") or "task-?")
+        capabilities = raw.get("capabilities") or ()
         return cls(
             identity=str(raw.get("identity") or key),
             key=key,
@@ -94,6 +110,23 @@ class FleetRow:
             run_id=str(raw.get("run_id") or ""),
             journal=str(raw.get("journal") or ""),
             trace_source=str(raw.get("trace_source") or ""),
+            job_id=str(raw.get("job_id") or ""),
+            owner=str(raw.get("owner") or ""),
+            workspace_id=str(raw.get("workspace_id") or ""),
+            container=str(raw.get("container") or ""),
+            host_path=str(raw.get("host_path") or ""),
+            run_dir_relpath=str(raw.get("run_dir_relpath") or ""),
+            worktree_relpath=str(raw.get("worktree_relpath") or ""),
+            session_file_relpath=str(raw.get("session_file_relpath") or ""),
+            session_lock_path=str(raw.get("session_lock_path") or ""),
+            tmux_session=str(raw.get("tmux_session") or ""),
+            lease_generation=int(raw.get("lease_generation") or 0),
+            remote=bool(raw.get("remote")),
+            capabilities=tuple(str(item) for item in capabilities),
+            audit_available=bool(raw.get("audit_available")),
+            last_heartbeat_at=float(raw["last_heartbeat_at"])
+            if raw.get("last_heartbeat_at")
+            else None,
         )
 
 
@@ -368,6 +401,10 @@ class FleetLog:
         self.max_chars = max_chars
         self._trim()
 
+    def note(self, text: str) -> None:
+        """Append an out-of-band display line (e.g. a tail failure notice)."""
+        self._feed_chunk(RenderChunk(f"── {text}"))
+
     def feed_line(self, raw_line: str) -> bool:
         try:
             event = json.loads(raw_line)
@@ -546,7 +583,106 @@ async def follow_log_file(
         await asyncio.sleep(poll_interval_s)
 
 
+FOLLOW_MAX_LINE_BYTES = 8 * 1024 * 1024
+
+
+async def follow_command_output(
+    argv: Sequence[str],
+    on_line: Callable[[str], Awaitable[None]],
+    *,
+    cursor: LogCursor | None = None,
+) -> None:
+    """Stream a subprocess's stdout line by line, killing its process group
+    when the follower is cancelled (mirrors fetch_snapshot's killpg handling).
+
+    Reads in bounded chunks rather than readline() so a single oversized JSONL
+    line (session transcripts embed whole tool payloads) cannot blow asyncio's
+    64 KiB stream limit and kill the follower; lines beyond
+    FOLLOW_MAX_LINE_BYTES are dropped, not fatal. Exits with a RuntimeError
+    carrying the subprocess's stderr tail when the command fails, so callers
+    can surface the failure instead of stalling silently.
+
+    `cursor` is accepted for interface symmetry with follow_log_file; hosted
+    trace sources (e.g. `bw logs --follow`) resend their own backlog on each
+    invocation, so no byte-level resume state is tracked here.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        # stdin MUST be detached: with the app's terminal inherited, a hosted
+        # follower (`bw logs` → `ssh -t`) sees a tty, puts it into raw mode,
+        # and steals input from the app — including a suspended-TUI chat
+        # session running on that same terminal.
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+
+    stderr_tail: deque[bytes] = deque(maxlen=4)
+
+    async def drain_stderr(stream: asyncio.StreamReader) -> None:
+        pending = b""
+        while True:
+            chunk = await stream.read(16384)
+            if not chunk:
+                break
+            pending = (pending + chunk)[-16384:]
+            *complete, pending = pending.split(b"\n")
+            stderr_tail.extend(line for line in complete if line.strip())
+        if pending.strip():
+            stderr_tail.append(pending)
+
+    stderr_task = asyncio.ensure_future(drain_stderr(proc.stderr))
+    try:
+        buffer = b""
+        discarding = False
+        while True:
+            chunk = await proc.stdout.read(65536)
+            if not chunk:
+                break
+            buffer += chunk
+            *complete, buffer = buffer.split(b"\n")
+            for raw in complete:
+                if discarding:
+                    discarding = False
+                    continue
+                if raw.strip():
+                    await on_line(raw.decode(errors="replace").rstrip("\r"))
+            if len(buffer) > FOLLOW_MAX_LINE_BYTES:
+                buffer = b""
+                discarding = True
+        if buffer.strip() and not discarding:
+            await on_line(buffer.decode(errors="replace").rstrip("\r"))
+        await proc.wait()
+        with contextlib.suppress(Exception):
+            await stderr_task
+        if proc.returncode:
+            detail = b" | ".join(stderr_tail).decode(errors="replace").strip()
+            message = f"trace follow exited {proc.returncode}"
+            raise RuntimeError(f"{message}: {detail[-240:]}" if detail else message)
+    finally:
+        stderr_task.cancel()
+        if proc.returncode is None:
+            # TERM first so an ssh client can close its channels (a SIGKILLed
+            # ssh can wedge a shared control master), then KILL stragglers.
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(proc.wait(), 0.5)
+            except BaseException:  # includes re-cancellation during teardown
+                pass
+            if proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                with contextlib.suppress(Exception):
+                    await proc.wait()
+
+
 def resume_eligible(row: FleetRow) -> bool:
+    if row.remote:
+        return "resume" in row.capabilities
     return bool(
         row.session
         and row.derived in RESUMABLE_STATES
@@ -555,6 +691,8 @@ def resume_eligible(row: FleetRow) -> bool:
 
 
 def interactive_command(row: FleetRow) -> tuple[str, ...]:
+    if row.remote:
+        raise ValueError(f"{row.key} is a hosted run; build the bw argv directly")
     if not resume_eligible(row):
         raise ValueError(f"{row.key} is not a resumable conversation")
     if row.provider == "claude":

@@ -259,7 +259,7 @@ class PiParallelismTest(unittest.TestCase):
     def test_project_polling_fetches_projects_in_parallel_and_commits_serially(self):
         cfg = {
             "keychain": {"service": "svc", "account": "acct"},
-            "owner": "stanwang",
+            "owner": "maintainer",
             "defaults": {},
             "projects": [
                 {
@@ -342,7 +342,7 @@ class PiParallelismTest(unittest.TestCase):
     def test_fast_project_commits_while_slow_project_poll_is_running(self):
         cfg = {
             "keychain": {"service": "svc", "account": "acct"},
-            "owner": "stanwang",
+            "owner": "maintainer",
             "defaults": {},
             "projects": [
                 {
@@ -445,7 +445,7 @@ class PiParallelismTest(unittest.TestCase):
     def test_failed_assembly_does_not_advance_live_poll_state(self):
         cfg = {
             "keychain": {"service": "svc", "account": "acct"},
-            "owner": "stanwang",
+            "owner": "maintainer",
             "defaults": {},
             "projects": [
                 {

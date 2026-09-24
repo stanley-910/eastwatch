@@ -21,7 +21,7 @@ searchable recovery shadow of the watcher's last observed Status; it is not a
 command, is not a complete transition journal, and MUST NOT trigger dispatch.
 
 (On GitLab the label — not the assignee — is the claim signal: every agent
-session authenticates as `stanwang`, so assignee is useless. GitLab auto-swaps
+session authenticates as the maintainer, so assignee is useless. GitLab auto-swaps
 same-scope labels, so a card is in exactly one lane, always.)
 
 ## 1. Agent lifecycle — `agent::` scope (mutually exclusive)

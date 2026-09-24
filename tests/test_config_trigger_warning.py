@@ -16,13 +16,13 @@ class UnknownTriggerWarningTest(unittest.TestCase):
     def test_stale_label_name_warns_and_names_the_valid_set(self):
         cfg = {
             "projects": [
-                {"path": "stanwang/example", "triggers": ["ready-for-agent", "mention"]}
+                {"path": "owner/example", "triggers": ["ready-for-agent", "mention"]}
             ]
         }
         with self.assertLogs(watcher.log, level="WARNING") as captured:
             watcher.warn_unknown_triggers(cfg)
         self.assertEqual(len(captured.output), 1)
-        self.assertIn("stanwang/example", captured.output[0])
+        self.assertIn("owner/example", captured.output[0])
         self.assertIn("ready-for-agent", captured.output[0])
         self.assertIn("agent::ready", captured.output[0])
 
@@ -30,7 +30,7 @@ class UnknownTriggerWarningTest(unittest.TestCase):
         cfg = {
             "projects": [
                 {
-                    "path": "stanwang/example",
+                    "path": "owner/example",
                     "triggers": [
                         "agent::ready",
                         "agent::ready-research",
@@ -45,7 +45,7 @@ class UnknownTriggerWarningTest(unittest.TestCase):
 
     def test_missing_triggers_key_is_silent(self):
         with self.assertNoLogs(watcher.log, level="WARNING"):
-            watcher.warn_unknown_triggers({"projects": [{"path": "stanwang/example"}]})
+            watcher.warn_unknown_triggers({"projects": [{"path": "owner/example"}]})
 
 
 if __name__ == "__main__":

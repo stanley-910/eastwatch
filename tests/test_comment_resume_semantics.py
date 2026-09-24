@@ -51,7 +51,7 @@ def conv():
 
 def assemble_once(gl, ps, gesture, triggers=("mention",)):
     watcher.assemble(
-        gl, PROJ, ps, [gesture], [], set(), "stanwang", DEFAULTS, list(triggers)
+        gl, PROJ, ps, [gesture], [], set(), "maintainer", DEFAULTS, list(triggers)
     )
 
 
@@ -380,8 +380,8 @@ class CommentResumeSemanticsTest(unittest.TestCase):
             ps,
             [],
             [],
-            {("note:55", "white_check_mark", "stanwang")},
-            "stanwang",
+            {("note:55", "white_check_mark", "maintainer")},
+            "maintainer",
             DEFAULTS,
             ["mention"],
         )

@@ -1,6 +1,29 @@
 # eastwatch config — copy to ~/.config/eastwatch/config.yaml
 # The GitLab token itself lives in the macOS keychain, never in this file.
 
+# Execution mode. Absent or "local" runs the classic single-machine
+# eastwatch loop below unchanged. "hosted" hands dispatch to bw-controller
+# instead: the local `eastwatch` binary refuses to start (fail-closed) so
+# a stale launchd job can never double-dispatch against a hosted deployment.
+# Hosted mode is explicit and refuses to start half-configured — database,
+# listen_host, listen_port, admins, and a token environment binding for every
+# project are required. A controller-level bot_token_env is the fallback;
+# projects can override it so one controller and one user workspace can serve
+# projects backed by different project access tokens. Raw runner tokens are
+# never written here; they are issued into SQLite when a workspace is provisioned.
+# execution:
+#   mode: hosted
+#   controller:
+#     database: /var/lib/eastwatch/controller.db
+#     listen_host: bw-controller-internal
+#     listen_port: 8765
+#     lease_seconds: 90
+#     heartbeat_seconds: 20
+#     long_poll_seconds: 20
+#     bot_token_env: EASTWATCH_GITLAB_TOKEN  # optional project fallback
+#     admins: [your-username]
+#     approved_bots: [eastwatch-bot]
+
 keychain:
   service: eastwatch-gitlab-bot
   account: eastwatch
@@ -51,6 +74,10 @@ projects:
     # and to author agent comments.
     bot_username: project_123456_bot
     bot_user_id: 12345
+    # Optional override for this project's access token. The named variable
+    # belongs in controller.env, never in this file. Required when the
+    # controller-level token cannot access this project.
+    bot_token_env: EASTWATCH_GITLAB_TOKEN_PROJECT_123456
     # Enabled triggers: trigger labels by name, "mention" (@agent comments),
     # "emoji" (✅/👍 approval on parked questions).
     triggers: [agent::ready, agent::ready-research, mention, emoji]

@@ -1,0 +1,5 @@
+ssh_target: admin@eastwatch-host
+ssh_alias: eastwatch
+owner: your-gitlab-username
+server_command: /opt/eastwatch/.venv/bin/bw
+editor: code

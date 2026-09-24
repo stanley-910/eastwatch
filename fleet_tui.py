@@ -3,6 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = [
 #     "textual>=6.6,<7",
+#     "pyyaml>=6",
 # ]
 # ///
 """Compatibility entrypoint for the packaged fleet console."""
